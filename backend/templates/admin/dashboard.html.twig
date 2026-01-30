@@ -1,0 +1,609 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Dashboard Administrateur{% endblock %}
+
+{% block stylesheets %}
+    {{ parent() }}
+    <style>
+        :root {
+            --sidebar-width: 250px;
+            --topbar-height: 60px;
+        }
+
+        body {
+            background-color: #f8f9fa;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: var(--sidebar-width);
+            background: linear-gradient(180deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            z-index: 1000;
+            overflow-y: auto;
+            transition: all 0.3s;
+        }
+
+        .sidebar-brand {
+            padding: 20px;
+            font-size: 1.5rem;
+            font-weight: 700;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .sidebar-nav {
+            padding: 20px 0;
+        }
+
+        .nav-item {
+            margin: 5px 15px;
+        }
+
+        .nav-link {
+            color: rgba(255, 255, 255, 0.8);
+            padding: 12px 15px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            transition: all 0.3s;
+        }
+
+        .nav-link:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            transform: translateX(5px);
+        }
+
+        .nav-link.active {
+            background-color: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .nav-link i {
+            width: 20px;
+            margin-right: 10px;
+        }
+
+        /* Main Content */
+        .main-content {
+            margin-left: var(--sidebar-width);
+            min-height: 100vh;
+        }
+
+        /* Topbar */
+        .topbar {
+            height: var(--topbar-height);
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 30px;
+            position: sticky;
+            top: 0;
+            z-index: 999;
+        }
+
+        /* Stats Cards */
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .stat-card .icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .stat-card.primary .icon {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .stat-card.success .icon {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .stat-card.warning .icon {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .stat-card.info .icon {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin: 10px 0;
+        }
+
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+
+        .stat-change {
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .stat-change.positive {
+            color: #27ae60;
+        }
+
+        .stat-change.negative {
+            color: #e74c3c;
+        }
+
+        /* Charts Card */
+        .chart-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        }
+
+        .chart-card-header {
+            border-bottom: 1px solid #ecf0f1;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+
+        /* Recent Activity */
+        .activity-item {
+            padding: 15px;
+            border-left: 3px solid #3498db;
+            background: #f8f9fa;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+
+        .activity-time {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+        }
+
+        /* Table */
+        .table-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        }
+
+        .table thead th {
+            border-bottom: 2px solid #ecf0f1;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .badge-custom {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+
+            .sidebar.show {
+                transform: translateX(0);
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+        }
+    </style>
+{% endblock %}
+
+{% block body %}
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <i class="fas fa-home-lg-alt"></i>
+            AdminPanel
+        </div>
+        
+        <nav class="sidebar-nav">
+            <ul class="nav flex-column">
+                <li class="nav-item">
+                    <a class="nav-link active" href="{{ path('admin_dashboard') }}">
+                        <i class="fas fa-tachometer-alt"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ path('admin_users') }}">
+                        <i class="fas fa-users"></i>
+                        <span>Utilisateurs</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ path('admin_prestataires') }}">
+                        <i class="fas fa-briefcase"></i>
+                        <span>Prestataires</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ path('admin_clients') }}">
+                        <i class="fas fa-user-friends"></i>
+                        <span>Clients</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ path('admin_bookings') }}">
+                        <i class="fas fa-calendar-check"></i>
+                        <span>Réservations</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ path('admin_payments') }}">
+                        <i class="fas fa-credit-card"></i>
+                        <span>Paiements</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ path('admin_categories') }}">
+                        <i class="fas fa-tags"></i>
+                        <span>Catégories</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ path('admin_reviews') }}">
+                        <i class="fas fa-star"></i>
+                        <span>Avis</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ path('admin_reports') }}">
+                        <i class="fas fa-chart-line"></i>
+                        <span>Rapports</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ path('admin_settings') }}">
+                        <i class="fas fa-cog"></i>
+                        <span>Paramètres</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Topbar -->
+        <header class="topbar">
+            <div class="d-flex align-items-center">
+                <button class="btn btn-link d-md-none" id="sidebarToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <h5 class="mb-0 ms-3">Dashboard</h5>
+            </div>
+            
+            <div class="d-flex align-items-center">
+                <!-- Notifications -->
+                <div class="dropdown me-3">
+                    <button class="btn btn-link position-relative" data-bs-toggle="dropdown">
+                        <i class="fas fa-bell fs-5"></i>
+                        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                            5
+                        </span>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><h6 class="dropdown-header">Notifications</h6></li>
+                        <li><a class="dropdown-item" href="#">Nouvelle réservation</a></li>
+                        <li><a class="dropdown-item" href="#">Nouveau prestataire</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-center" href="#">Voir tout</a></li>
+                    </ul>
+                </div>
+
+                <!-- User Menu -->
+                <div class="dropdown">
+                    <button class="btn btn-link d-flex align-items-center" data-bs-toggle="dropdown">
+                        <img src="https://ui-avatars.com/api/?name=Admin&background=667eea&color=fff" 
+                             class="rounded-circle me-2" width="35" height="35">
+                        <span class="d-none d-md-inline">{{ app.user.fullName }}</span>
+                        <i class="fas fa-chevron-down ms-2"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="{{ path('admin_profile') }}">
+                            <i class="fas fa-user me-2"></i> Profil
+                        </a></li>
+                        <li><a class="dropdown-item" href="{{ path('admin_settings') }}">
+                            <i class="fas fa-cog me-2"></i> Paramètres
+                        </a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{{ path('app_logout') }}">
+                            <i class="fas fa-sign-out-alt me-2"></i> Déconnexion
+                        </a></li>
+                    </ul>
+                </div>
+            </div>
+        </header>
+
+        <!-- Page Content -->
+        <div class="container-fluid p-4">
+            <!-- Stats Cards -->
+            <div class="row g-4 mb-4">
+                <div class="col-xl-3 col-md-6">
+                    <div class="stat-card primary">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="stat-label">Total Utilisateurs</div>
+                                <div class="stat-value">{{ stats.totalUsers ?? 1234 }}</div>
+                                <div class="stat-change positive">
+                                    <i class="fas fa-arrow-up"></i> +12% ce mois
+                                </div>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-3 col-md-6">
+                    <div class="stat-card success">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="stat-label">Réservations</div>
+                                <div class="stat-value">{{ stats.totalBookings ?? 567 }}</div>
+                                <div class="stat-change positive">
+                                    <i class="fas fa-arrow-up"></i> +8% ce mois
+                                </div>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-calendar-check"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-3 col-md-6">
+                    <div class="stat-card warning">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="stat-label">Revenus</div>
+                                <div class="stat-value">{{ stats.totalRevenue ?? '45.2K' }}€</div>
+                                <div class="stat-change positive">
+                                    <i class="fas fa-arrow-up"></i> +15% ce mois
+                                </div>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-euro-sign"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-3 col-md-6">
+                    <div class="stat-card info">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="stat-label">Prestataires</div>
+                                <div class="stat-value">{{ stats.totalPrestataires ?? 89 }}</div>
+                                <div class="stat-change negative">
+                                    <i class="fas fa-arrow-down"></i> -2% ce mois
+                                </div>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-briefcase"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="row g-4 mb-4">
+                <div class="col-xl-8">
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h5 class="mb-0">Réservations par mois</h5>
+                        </div>
+                        <canvas id="bookingsChart" height="80"></canvas>
+                    </div>
+                </div>
+
+                <div class="col-xl-4">
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h5 class="mb-0">Catégories populaires</h5>
+                        </div>
+                        <canvas id="categoriesChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tables and Activity Row -->
+            <div class="row g-4">
+                <div class="col-xl-8">
+                    <div class="table-card">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="mb-0">Dernières Réservations</h5>
+                            <a href="{{ path('admin_bookings') }}" class="btn btn-sm btn-primary">Voir tout</a>
+                        </div>
+                        
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Client</th>
+                                        <th>Prestataire</th>
+                                        <th>Service</th>
+                                        <th>Date</th>
+                                        <th>Montant</th>
+                                        <th>Statut</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for booking in recentBookings ?? [] %}
+                                        <tr>
+                                            <td>#{{ booking.id }}</td>
+                                            <td>{{ booking.client.fullName }}</td>
+                                            <td>{{ booking.prestataire.fullName }}</td>
+                                            <td>{{ booking.service }}</td>
+                                            <td>{{ booking.date|date('d/m/Y') }}</td>
+                                            <td>{{ booking.amount }}€</td>
+                                            <td>
+                                                <span class="badge badge-custom bg-{{ booking.statusColor }}">
+                                                    {{ booking.status }}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    {% else %}
+                                        <tr>
+                                            <td colspan="7" class="text-center text-muted">
+                                                Aucune réservation récente
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-4">
+                    <div class="chart-card">
+                        <div class="chart-card-header">
+                            <h5 class="mb-0">Activité Récente</h5>
+                        </div>
+                        
+                        <div class="activity-list">
+                            {% for activity in recentActivities ?? [] %}
+                                <div class="activity-item">
+                                    <div class="d-flex justify-content-between">
+                                        <strong>{{ activity.title }}</strong>
+                                        <span class="activity-time">{{ activity.time }}</span>
+                                    </div>
+                                    <p class="mb-0 text-muted small">{{ activity.description }}</p>
+                                </div>
+                            {% else %}
+                                <div class="activity-item">
+                                    <strong>Nouveau utilisateur inscrit</strong>
+                                    <div class="activity-time">Il y a 5 min</div>
+                                    <p class="mb-0 text-muted small">Jean Dupont s'est inscrit</p>
+                                </div>
+                                <div class="activity-item">
+                                    <strong>Réservation confirmée</strong>
+                                    <div class="activity-time">Il y a 15 min</div>
+                                    <p class="mb-0 text-muted small">Réservation #1234 confirmée</p>
+                                </div>
+                                <div class="activity-item">
+                                    <strong>Nouveau prestataire</strong>
+                                    <div class="activity-time">Il y a 1h</div>
+                                    <p class="mb-0 text-muted small">Marie Martin a créé son profil</p>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block javascripts %}
+    {{ parent() }}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        // Sidebar Toggle for Mobile
+        document.getElementById('sidebarToggle')?.addEventListener('click', function() {
+            document.querySelector('.sidebar').classList.toggle('show');
+        });
+
+        // Bookings Chart
+        const bookingsCtx = document.getElementById('bookingsChart');
+        if (bookingsCtx) {
+            new Chart(bookingsCtx, {
+                type: 'line',
+                data: {
+                    labels: ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'],
+                    datasets: [{
+                        label: 'Réservations',
+                        data: [65, 78, 85, 92, 88, 95, 102, 110, 98, 105, 115, 125],
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Categories Chart
+        const categoriesCtx = document.getElementById('categoriesChart');
+        if (categoriesCtx) {
+            new Chart(categoriesCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Ménage', 'Repassage', 'Jardinage', 'Garde d\'enfants', 'Autres'],
+                    datasets: [{
+                        data: [35, 25, 20, 15, 5],
+                        backgroundColor: [
+                            '#667eea',
+                            '#764ba2',
+                            '#11998e',
+                            '#38ef7d',
+                            '#f093fb'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+{% endblock %}

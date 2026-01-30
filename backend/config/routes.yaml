@@ -1,0 +1,9 @@
+controllers:
+    resource:
+        path: ../src/Controller/
+        namespace: App\Controller
+    type: attribute
+finance:
+    resource: ../src/Finance/Controller/
+    type: attribute
+    prefix: /finance

@@ -1,2 +1,25 @@
 ### composer ###
 composer.phar
+###> symfony/framework-bundle ###
+/backend/.env.local
+/backend/.env.local.php
+/backend/.env.*.local
+/backend/config/secrets/prod/prod.decrypt.private.php
+/backend/public/bundles/
+/backend/var/
+/backend/vendor/
+###< symfony/framework-bundle ###
+
+###> phpunit/phpunit ###
+/backend/phpunit.xml
+/.phpunit.cache/
+###< phpunit/phpunit ###
+
+###> symfony/asset-mapper ###
+/backend/public/assets/
+/backend/assets/vendor/
+###< symfony/asset-mapper ###
+
+###> lexik/jwt-authentication-bundle ###
+/backend/config/jwt/*.pem
+###< lexik/jwt-authentication-bundle ###

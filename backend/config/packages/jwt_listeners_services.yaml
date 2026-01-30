@@ -1,0 +1,49 @@
+# config/services.yaml
+
+services:
+    # Configuration par défaut des services
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    # JWT Event Listeners
+    
+    # Listener pour personnaliser le payload lors de la création du JWT
+    App\EventListener\JWTCreatedListener:
+        tags:
+            - { name: kernel.event_listener, event: lexik_jwt_authentication.on_jwt_created, method: onJWTCreated }
+
+    # Listener pour gérer les actions après authentification JWT réussie
+    App\EventListener\JWTAuthenticatedListener:
+        tags:
+            - { name: kernel.event_listener, event: lexik_jwt_authentication.on_jwt_authenticated, method: onJWTAuthenticated }
+
+    # Listener pour valider le token décodé
+    App\EventListener\JWTDecodedListener:
+        tags:
+            - { name: kernel.event_listener, event: lexik_jwt_authentication.on_jwt_decoded, method: onJWTDecoded }
+
+    # Listener pour gérer les erreurs d'authentification JWT (optionnel)
+    # App\EventListener\JWTAuthenticationFailureListener:
+    #     tags:
+    #         - { name: kernel.event_listener, event: lexik_jwt_authentication.on_authentication_failure, method: onAuthenticationFailure }
+
+    # Listener pour gérer les succès d'authentification JWT (optionnel)
+    # App\EventListener\JWTAuthenticationSuccessListener:
+    #     tags:
+    #         - { name: kernel.event_listener, event: lexik_jwt_authentication.on_authentication_success, method: onAuthenticationSuccess }
+
+    # Listener pour gérer les tokens invalides (optionnel)
+    # App\EventListener\JWTInvalidListener:
+    #     tags:
+    #         - { name: kernel.event_listener, event: lexik_jwt_authentication.on_jwt_invalid, method: onJWTInvalid }
+
+    # Listener pour gérer les tokens non trouvés (optionnel)
+    # App\EventListener\JWTNotFoundListener:
+    #     tags:
+    #         - { name: kernel.event_listener, event: lexik_jwt_authentication.on_jwt_not_found, method: onJWTNotFound }
+
+    # Listener pour gérer les tokens expirés (optionnel)
+    # App\EventListener\JWTExpiredListener:
+    #     tags:
+    #         - { name: kernel.event_listener, event: lexik_jwt_authentication.on_jwt_expired, method: onJWTExpired }

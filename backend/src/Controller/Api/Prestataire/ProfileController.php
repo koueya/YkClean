@@ -5,7 +5,7 @@ namespace App\Controller\Api\Prestataire;
 use App\Entity\User\Prestataire;
 use App\Repository\User\PrestataireRepository;
 use App\Repository\Service\ServiceCategoryRepository;
-use App\Service\FileUploadService;
+use App\Service\File\FileUploadService;
 use App\Service\Payment\StripeService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;

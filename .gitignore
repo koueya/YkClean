@@ -1,5 +1,5 @@
 ### composer ###
-composer.phar
+/composer.phar
 ###> symfony/framework-bundle ###
 /backend/.env.local
 /backend/.env.local.php

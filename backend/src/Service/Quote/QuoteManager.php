@@ -18,7 +18,16 @@ use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Psr\Log\LoggerInterface;
 
-class QuoteManager
+/**
+ * Service de gestion des devis
+ * 
+ * Gère le cycle de vie complet des devis :
+ * - Création et validation
+ * - Acceptation/Rejet
+ * - Retrait et expiration
+ * - Statistiques et comparaisons
+ */
+class QuoteService
 {
     private const STATUS_PENDING = 'pending';
     private const STATUS_ACCEPTED = 'accepted';

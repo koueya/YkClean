@@ -7,7 +7,7 @@ use App\Entity\Service\ServiceRequest;
 use App\Repository\Service\ServiceRequestRepository;
 use App\Repository\Quote\QuoteRepository;
 use App\Security\Voter\PrestataireVoter;
-use App\Service\MatchingService;
+use App\Service\Matching\MatchingService;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;

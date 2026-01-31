@@ -3,10 +3,10 @@
 namespace App\EventListener;
 
 use App\Event\BookingCompletedEvent;
-use App\Service\NotificationService;
-use App\Service\PaymentService;
-use App\Service\RatingService;
-use App\Service\CommissionService;
+use App\Service\Notification\NotificationService;
+use App\Service\Payment\PaymentService;
+use App\Service\Review\RatingService;
+use App\Service\Payment\CommissionService;
 use App\Entity\Payment\Payment;
 use App\Entity\Payment\Commission;
 use Doctrine\ORM\EntityManagerInterface;

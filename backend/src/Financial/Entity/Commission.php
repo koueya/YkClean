@@ -1,11 +1,11 @@
 <?php
-// src/Entity/Financial/Commission.php
+// src/Financial/Entity/Commission.php
 
-namespace App\Entity\Financial;
+namespace App\Financial\Entity;
 
-use App\Entity\Booking;
-use App\Entity\Prestataire;
-use App\Repository\Financial\CommissionRepository;
+use App\Entity\Booking\Booking;
+use App\Entity\User\Prestataire;
+use App\Financial\Repository\CommissionRepository;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
 

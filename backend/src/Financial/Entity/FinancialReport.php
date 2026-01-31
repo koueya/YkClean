@@ -1,12 +1,12 @@
 <?php
-// src/Entity/Financial/FinancialReport.php
+// src/Financial/Entity/FinancialReport.php
 
-namespace App\Entity\Financial;
+namespace App\Financial;
+use App\Entity\User\User;
+use App\Entity\User\Prestataire;
+use App\Entity\User\Client;
 
-use App\Entity\User;
-use App\Entity\Prestataire;
-use App\Entity\Client;
-use App\Repository\Financial\FinancialReportRepository;
+use App\Financial\Repository\FinancialReportRepository;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: FinancialReportRepository::class)]

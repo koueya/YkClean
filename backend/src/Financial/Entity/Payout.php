@@ -2,7 +2,8 @@
 namespace App\Entity\Financial;
 
 use Doctrine\ORM\Mapping as ORM;
-
+use App\Entity\User\Prestataire;
+use App\Financial\Repository\PayoutRepository;
 #[ORM\Entity(repositoryClass: PayoutRepository::class)]
 #[ORM\Table(name: 'payouts')]
 class Payout

@@ -4,7 +4,7 @@
 namespace App\Repository\Financial;
 
 use App\Entity\Financial\Commission;
-use App\Entity\Prestataire;
+use App\Entity\User\Prestataire;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

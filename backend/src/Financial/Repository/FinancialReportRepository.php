@@ -1,12 +1,12 @@
 <?php
 // src/Repository/Financial/FinancialReportRepository.php
 
-namespace App\Repository\Financial;
+namespace App\Financial\Repository;
 
-use App\Entity\Financial\FinancialReport;
-use App\Entity\Prestataire;
-use App\Entity\Client;
-use App\Entity\User;
+use App\Financial\Entity\FinancialReport;
+use App\Entity\User\Prestataire;
+use App\Entity\User\Client;
+use App\Entity\User\User;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

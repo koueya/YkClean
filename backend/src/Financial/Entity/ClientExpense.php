@@ -1,11 +1,14 @@
 <?php
-// src/Entity/Financial/ClientExpense.php
+// src/Financial/Entity/ClientExpense.php
 
-namespace Financial\Entity;
+namespace App\Financial\Entity;
 
-use App\Entity\Client;
-use App\Entity\Booking;
-use App\Repository\Financial\ClientExpenseRepository;
+
+use App\Entity\Booking\Booking;
+use App\Entity\User\Client;
+use App\Financial\Entity\Refund;
+use App\Financial\Repository\ClientExpenseRepository;
+
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: ClientExpenseRepository::class)]

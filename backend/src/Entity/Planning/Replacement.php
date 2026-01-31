@@ -1,86 +1,101 @@
 <?php
-// src/Entity/Planning/Replacement.php
 
 namespace App\Entity\Planning;
 
-use App\Repository\ReplacementRepository;
+use App\Entity\Booking\Booking;
+use App\Entity\User\Prestataire;
 use Doctrine\ORM\Mapping as ORM;
-use App\Entity\Booking;
-use App\Entity\Planning\Prestataire;
-use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Serializer\Annotation\Groups;
 
-#[ORM\Entity(repositoryClass: ReplacementRepository::class)]
+#[ORM\Entity(repositoryClass: 'App\Repository\Planning\ReplacementRepository')]
 #[ORM\Table(name: 'replacements')]
 class Replacement
 {
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column(type: 'integer')]
+    #[Groups(['replacement:read'])]
     private ?int $id = null;
 
     #[ORM\ManyToOne(targetEntity: Booking::class, inversedBy: 'replacements')]
     #[ORM\JoinColumn(nullable: false)]
-    private ?Booking $originalBooking = null;
+    #[Groups(['replacement:read'])]
+    private Booking $booking;
 
-    #[ORM\ManyToOne(targetEntity: Prestataire::class, inversedBy: 'replacementsAsOriginal')]
+    #[ORM\ManyToOne(targetEntity: Prestataire::class)]
     #[ORM\JoinColumn(nullable: false)]
-    private ?Prestataire $originalPrestataire = null;
+    #[Groups(['replacement:read'])]
+    private Prestataire $originalPrestataire;
 
-    #[ORM\ManyToOne(targetEntity: Prestataire::class, inversedBy: 'replacementsAsReplacement')]
+    #[ORM\ManyToOne(targetEntity: Prestataire::class)]
     #[ORM\JoinColumn(nullable: true)]
+    #[Groups(['replacement:read'])]
     private ?Prestataire $replacementPrestataire = null;
 
     #[ORM\Column(type: 'string', length: 255)]
-    #[Assert\NotBlank]
-    private ?string $reason = null;
+    #[Groups(['replacement:read'])]
+    private string $reason;
 
-    #[ORM\Column(type: 'string', length: 50)]
-    private string $status = 'pending'; // pending, confirmed, rejected, cancelled
-
-    #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $notes = null;
+    #[ORM\Column(type: 'string', length: 20)]
+    #[Groups(['replacement:read'])]
+    private string $status; // pending, accepted, declined, cancelled
 
     #[ORM\Column(type: 'datetime_immutable')]
-    private ?\DateTimeImmutable $requestedAt = null;
+    #[Groups(['replacement:read'])]
+    private \DateTimeImmutable $requestedAt;
 
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
-    private ?\DateTimeImmutable $confirmedAt = null;
+    #[Groups(['replacement:read'])]
+    private ?\DateTimeImmutable $proposedAt = null;
 
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
-    private ?\DateTimeImmutable $rejectedAt = null;
+    #[Groups(['replacement:read'])]
+    private ?\DateTimeImmutable $acceptedAt = null;
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    #[Groups(['replacement:read'])]
+    private ?\DateTimeImmutable $declinedAt = null;
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    #[Groups(['replacement:read'])]
+    private ?\DateTimeImmutable $cancelledAt = null;
 
     #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $rejectionReason = null;
+    #[Groups(['replacement:read'])]
+    private ?string $declineReason = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    #[Groups(['replacement:read'])]
+    private ?string $notes = null;
 
     public function __construct()
     {
         $this->requestedAt = new \DateTimeImmutable();
+        $this->status = 'pending';
     }
-
-    // Getters and Setters
 
     public function getId(): ?int
     {
         return $this->id;
     }
 
-    public function getOriginalBooking(): ?Booking
+    public function getBooking(): Booking
     {
-        return $this->originalBooking;
+        return $this->booking;
     }
 
-    public function setOriginalBooking(?Booking $originalBooking): self
+    public function setBooking(Booking $booking): self
     {
-        $this->originalBooking = $originalBooking;
+        $this->booking = $booking;
         return $this;
     }
 
-    public function getOriginalPrestataire(): ?Prestataire
+    public function getOriginalPrestataire(): Prestataire
     {
         return $this->originalPrestataire;
     }
 
-    public function setOriginalPrestataire(?Prestataire $originalPrestataire): self
+    public function setOriginalPrestataire(Prestataire $originalPrestataire): self
     {
         $this->originalPrestataire = $originalPrestataire;
         return $this;
@@ -97,7 +112,7 @@ class Replacement
         return $this;
     }
 
-    public function getReason(): ?string
+    public function getReason(): string
     {
         return $this->reason;
     }
@@ -116,13 +131,72 @@ class Replacement
     public function setStatus(string $status): self
     {
         $this->status = $status;
-        
-        if ($status === 'confirmed') {
-            $this->confirmedAt = new \DateTimeImmutable();
-        } elseif ($status === 'rejected') {
-            $this->rejectedAt = new \DateTimeImmutable();
-        }
-        
+        return $this;
+    }
+
+    public function getRequestedAt(): \DateTimeImmutable
+    {
+        return $this->requestedAt;
+    }
+
+    public function setRequestedAt(\DateTimeImmutable $requestedAt): self
+    {
+        $this->requestedAt = $requestedAt;
+        return $this;
+    }
+
+    public function getProposedAt(): ?\DateTimeImmutable
+    {
+        return $this->proposedAt;
+    }
+
+    public function setProposedAt(?\DateTimeImmutable $proposedAt): self
+    {
+        $this->proposedAt = $proposedAt;
+        return $this;
+    }
+
+    public function getAcceptedAt(): ?\DateTimeImmutable
+    {
+        return $this->acceptedAt;
+    }
+
+    public function setAcceptedAt(?\DateTimeImmutable $acceptedAt): self
+    {
+        $this->acceptedAt = $acceptedAt;
+        return $this;
+    }
+
+    public function getDeclinedAt(): ?\DateTimeImmutable
+    {
+        return $this->declinedAt;
+    }
+
+    public function setDeclinedAt(?\DateTimeImmutable $declinedAt): self
+    {
+        $this->declinedAt = $declinedAt;
+        return $this;
+    }
+
+    public function getCancelledAt(): ?\DateTimeImmutable
+    {
+        return $this->cancelledAt;
+    }
+
+    public function setCancelledAt(?\DateTimeImmutable $cancelledAt): self
+    {
+        $this->cancelledAt = $cancelledAt;
+        return $this;
+    }
+
+    public function getDeclineReason(): ?string
+    {
+        return $this->declineReason;
+    }
+
+    public function setDeclineReason(?string $declineReason): self
+    {
+        $this->declineReason = $declineReason;
         return $this;
     }
 
@@ -137,47 +211,30 @@ class Replacement
         return $this;
     }
 
-    public function getRequestedAt(): ?\DateTimeImmutable
+    // Méthodes utilitaires
+
+    public function isPending(): bool
     {
-        return $this->requestedAt;
+        return $this->status === 'pending';
     }
 
-    public function setRequestedAt(\DateTimeImmutable $requestedAt): self
+    public function isAccepted(): bool
     {
-        $this->requestedAt = $requestedAt;
-        return $this;
+        return $this->status === 'accepted';
     }
 
-    public function getConfirmedAt(): ?\DateTimeImmutable
+    public function isDeclined(): bool
     {
-        return $this->confirmedAt;
+        return $this->status === 'declined';
     }
 
-    public function setConfirmedAt(?\DateTimeImmutable $confirmedAt): self
+    public function isCancelled(): bool
     {
-        $this->confirmedAt = $confirmedAt;
-        return $this;
+        return $this->status === 'cancelled';
     }
 
-    public function getRejectedAt(): ?\DateTimeImmutable
+    public function hasReplacementPrestataire(): bool
     {
-        return $this->rejectedAt;
-    }
-
-    public function setRejectedAt(?\DateTimeImmutable $rejectedAt): self
-    {
-        $this->rejectedAt = $rejectedAt;
-        return $this;
-    }
-
-    public function getRejectionReason(): ?string
-    {
-        return $this->rejectionReason;
-    }
-
-    public function setRejectionReason(?string $rejectionReason): self
-    {
-        $this->rejectionReason = $rejectionReason;
-        return $this;
+        return $this->replacementPrestataire !== null;
     }
 }

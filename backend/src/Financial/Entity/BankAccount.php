@@ -1,10 +1,11 @@
 <?php
-// src/Entity/Financial/BankAccount.php
+// src/Financial/Entity/BankAccount.php
 
-namespace Financial\Entity;
+namespace App\Financial\Entity;
 
-use App\Entity\Prestataire;
-use App\Repository\Financial\BankAccountRepository;
+use App\Entity\User\Prestataire;
+use App\Financial\Repository\BankAccountRepository;
+
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
 

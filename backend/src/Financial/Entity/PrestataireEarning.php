@@ -1,11 +1,13 @@
 <?php
-// src/Entity/Finance/PrestataireEarning.php
+// src/Finance/Entity/PrestataireEarning.php
 
-namespace App\Entity\Finance;
+namespace App\Finance\Entity;
 
-use App\Entity\Prestataire;
-use App\Entity\Booking;
-use App\Repository\Finance\PrestataireEarningRepository;
+use App\Entity\Booking\Booking;
+use App\Entity\User\Prestataire;
+use App\Finance\Entity\Payout;
+use App\Financial\Repository\PrestataireEarningRepository;
+
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: PrestataireEarningRepository::class)]

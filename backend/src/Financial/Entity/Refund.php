@@ -1,9 +1,10 @@
 <?php
-// src/Entity/Finance/
+// src/Financial/Entity/Refund.php
 
-namespace App\Entity;
+namespace App\Financial\Entity;
 
-use App\Repository\RefundRepository;
+use App\Financial\Repository\RefundRepository;
+use App\Financial\Entity\Payment;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
 

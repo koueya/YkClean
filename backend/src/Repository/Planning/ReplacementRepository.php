@@ -1,7 +1,7 @@
 <?php
 // src/Repository/ReplacementRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Planning;
 
 use App\Entity\Replacement;
 use App\Entity\Booking;

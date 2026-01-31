@@ -1,7 +1,7 @@
 <?php
 // src/Entity/Document/Document.php
 
-namespace App\Document\Entity;
+namespace App\Entity\Document;
 
 use App\Repository\DocumentRepository;
 use Doctrine\ORM\Mapping as ORM;

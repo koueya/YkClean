@@ -3,7 +3,7 @@
 namespace App\Controller\Api\Client;
 
 use App\Entity\User\Client;
-use App\Repository\ClientRepository;
+use App\Repository\User\ClientRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;

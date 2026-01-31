@@ -1,9 +1,9 @@
 <?php
 // src/Repository/AdminRepository.php
 
-namespace App\Repository;
+namespace App\Repository\User;
 
-use App\Entity\Admin;
+use App\Entity\User\Admin;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

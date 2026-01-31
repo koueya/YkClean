@@ -1,10 +1,9 @@
 <?php
 // src/Repository/PrestataireRepository.php
 
-namespace App\Repository;
+namespace App\Repository\User;
 
-use App\Entity\Prestataire;
-use App\Entity\Category;
+use App\Entity\User\Prestataire;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

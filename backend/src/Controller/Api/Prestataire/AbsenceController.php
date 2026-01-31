@@ -2,9 +2,9 @@
 
 namespace App\Controller\Api\Prestataire;
 
-use App\Service\PlanningService;
-use App\Service\NotificationService;
-use App\Service\ReplacementService;
+use App\Service\Planning\PlanningService;
+use App\Service\Notification\NotificationService;
+use App\Service\Replacement\ReplacementService;
 use App\DTO\CreateAbsenceDTO;
 use App\DTO\UpdateAbsenceDTO;
 use App\Entity\User\Prestataire;

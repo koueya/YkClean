@@ -41,15 +41,9 @@ class ValidSiret extends Constraint
      */
     public bool $checkActive = false;
 
-    /**
-     * Groupes de validation
-     */
-    public array $groups = [];
-
-    /**
-     * Payload pour transporter des informations supplémentaires
-     */
-    public mixed $payload = null;
+    // ❌ SUPPRIMÉ : public array $groups = [];
+    // ❌ SUPPRIMÉ : public mixed $payload = null;
+    // Ces propriétés existent déjà dans Symfony\Component\Validator\Constraint
 
     public function __construct(
         array $options = null,
@@ -63,14 +57,20 @@ class ValidSiret extends Constraint
         mixed $payload = null
     ) {
         parent::__construct($options);
-
+        
         $this->message = $message ?? $this->message;
         $this->invalidFormatMessage = $invalidFormatMessage ?? $this->invalidFormatMessage;
         $this->invalidChecksumMessage = $invalidChecksumMessage ?? $this->invalidChecksumMessage;
         $this->notActiveMessage = $notActiveMessage ?? $this->notActiveMessage;
         $this->checkExistence = $checkExistence ?? $this->checkExistence;
         $this->checkActive = $checkActive ?? $this->checkActive;
-        $this->groups = $groups ?? $this->groups;
-        $this->payload = $payload ?? $this->payload;
+        
+        // ✅ CORRECTION : Utiliser les propriétés héritées
+        if ($groups !== null) {
+            $this->groups = $groups;
+        }
+        if ($payload !== null) {
+            $this->payload = $payload;
+        }
     }
 }

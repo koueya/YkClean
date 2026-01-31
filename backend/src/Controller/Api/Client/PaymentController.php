@@ -4,11 +4,10 @@ namespace App\Controller\Api\Client;
 
 use App\Entity\Payment\Payment;
 use App\Entity\User\Client;
-use App\Repository\PaymentRepository;
-use App\Repository\InvoiceRepository;
-use App\Repository\BookingRepository;
-use App\Service\PaymentService;
-use App\Service\NotificationService;
+use App\Repository\Booking\BookingRepository;
+use App\Service\Booking\BookingService;
+use App\Service\Notification\NotificationService;
+use App\Service\Payment\PaymentService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;

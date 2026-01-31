@@ -12,6 +12,7 @@
         "doctrine/doctrine-bundle": "^2.18",
         "doctrine/doctrine-migrations-bundle": "^3.7",
         "doctrine/orm": "^3.6",
+        "knplabs/knp-paginator-bundle": "*",
         "lexik/jwt-authentication-bundle": "*",
         "nelmio/cors-bundle": "*",
         "phpdocumentor/reflection-docblock": "5.2",

@@ -24,9 +24,9 @@ doctrine:
                 alias: App
             Finance:
                 is_bundle: false
-                dir: '%kernel.project_dir%/src/Financier/Entity'
-                prefix: 'App\Financier\Entity'
-                alias: Financier
+                dir: '%kernel.project_dir%/src/Financial/Entity'
+                prefix: 'App\Financial\Entity'
+                alias: Financial
 
 when@test:
     doctrine:

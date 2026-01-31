@@ -1,7 +1,7 @@
 <?php
 // src/Entity/Service/ServiceRequest.php
 
-namespace App\Service\Entity;
+namespace App\Entity\Service;
 
 use App\Repository\ServiceRequestRepository;
 use Doctrine\Common\Collections\ArrayCollection;

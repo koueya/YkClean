@@ -1,7 +1,7 @@
 <?php
 // src/Entity/Financial/BankAccount.php
 
-namespace App\Entity\Financial;
+namespace Financial\Entity;
 
 use App\Entity\Prestataire;
 use App\Repository\Financial\BankAccountRepository;

@@ -6,7 +6,7 @@ use App\Entity\User\Prestataire;
 use App\Repository\User\PrestataireRepository;
 use App\Repository\Booking\BookingRepository;
 use App\Repository\Payment\PaymentRepository;
-use App\Service\StripeService;
+use App\Service\Payment\StripeService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;

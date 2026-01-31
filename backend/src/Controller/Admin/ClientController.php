@@ -7,7 +7,7 @@ use App\Repository\User\ClientRepository;
 use App\Repository\Booking\BookingRepository;
 use App\Repository\Payment\PaymentRepository;
 use App\Repository\Service\ServiceRequestRepository;
-use App\Service\StripeService;
+use App\Service\Payment\StripeService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;

@@ -1,12 +1,12 @@
 <?php
 // src/Repository/ServiceRequestRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Service;
 
-use App\Entity\ServiceRequest;
-use App\Entity\Client;
-use App\Entity\Prestataire;
-use App\Entity\ServiceCategory;
+use App\Entity\Service\ServiceRequest;
+use App\Entity\User\Client;
+use App\Entity\User\Prestataire;
+use App\Entity\Service\ServiceCategory;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

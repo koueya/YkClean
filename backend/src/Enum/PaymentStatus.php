@@ -586,9 +586,10 @@ enum PaymentStatus: string
 
     /**
      * Conversion en chaîne
-     */
+     
     public function __toString(): string
     {
         return $this->value;
-    }
+    } 
+    */
 }

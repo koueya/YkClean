@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Service;
+namespace App\Service\Payment;
 
 use App\Entity\User\Client;
 use App\Entity\User\Prestataire;

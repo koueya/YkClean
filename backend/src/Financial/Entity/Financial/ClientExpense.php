@@ -1,7 +1,7 @@
 <?php
 // src/Entity/Financial/ClientExpense.php
 
-namespace App\Entity\Financial;
+namespace Financial\Entity;
 
 use App\Entity\Client;
 use App\Entity\Booking;

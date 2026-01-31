@@ -6,6 +6,9 @@ use App\Repository\RecurrenceRepository;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
+use App\Entity\Client\Client;
+use App\Entity\Prestataire\Prestataire;
+use App\Entity\Service\ServiceCategory;
 use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity(repositoryClass: RecurrenceRepository::class)]

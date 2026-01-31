@@ -1,12 +1,12 @@
 <?php
-// src/Repository/PaymentRepository.php
+// src/Repository/PaymntRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Payment;
 
-use App\Entity\Payment;
-use App\Entity\Booking;
-use App\Entity\Client;
-use App\Entity\Prestataire;
+use App\Entity\Payment\Payment;
+use App\Entity\Booking\Booking;
+use App\Entity\User\Client;
+use App\Entity\User\Prestataire;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

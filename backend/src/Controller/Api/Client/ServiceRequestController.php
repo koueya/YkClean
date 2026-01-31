@@ -4,9 +4,12 @@ namespace App\Controller\Api\Client;
 
 use App\Entity\Service\ServiceRequest;
 use App\Entity\User\Client;
-use App\Repository\ServiceRequestRepository;
-use App\Service\NotificationService;
-use App\Service\MatchingService;
+use App\Repository\Rating\ReviewRepository;
+use App\Repository\Booking\BookingRepository;
+use App\Repository\User\PrestataireRepository;
+use App\Service\Booking\BookingService;
+use App\Service\Notification\NotificationService;
+
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;

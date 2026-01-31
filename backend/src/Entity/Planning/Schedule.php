@@ -1,7 +1,7 @@
 <?php
 // src/Entity/Planning/Schedule.php
 
-namespace App\Planning\Entity;
+namespace App\EntityPlanning;
 
 use App\Repository\ScheduleRepository;
 use Doctrine\Common\Collections\ArrayCollection;

@@ -1,7 +1,7 @@
 <?php
 // src/Repository/ServiceTypeRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Service;
 
 use App\Entity\Service\ServiceType;
 use App\Entity\Service\ServiceCategory;

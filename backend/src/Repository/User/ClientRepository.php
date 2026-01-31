@@ -1,9 +1,9 @@
 <?php
 // src/Repository/ClientRepository.php
 
-namespace App\Repository;
+namespace App\Repository\User;
 
-use App\Entity\Client;
+use App\Entity\User\Client;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

@@ -5,10 +5,12 @@ namespace App\Controller\Api\Client;
 use App\Entity\Booking\Booking;
 use App\Entity\Quote\Quote;
 use App\Entity\User\Client;
-use App\Repository\QuoteRepository;
-use App\Repository\ServiceRequestRepository;
-use App\Service\BookingService;
-use App\Service\NotificationService;
+use App\Repository\Booking\BookingRepository;
+use App\Repository\Invoice\InvoiceRepository;
+use App\Repository\Payment\PaymentRepository;
+use App\Service\Notification\NotificationService;
+use App\Service\Payment\PaymentService;
+
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;

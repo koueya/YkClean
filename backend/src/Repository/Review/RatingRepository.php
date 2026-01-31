@@ -1,10 +1,10 @@
 <?php
 // src/Repository/RatingRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Review;
 
-use App\Entity\Rating;
-use App\Entity\User;
+use App\Entity\Review\Rating;
+use App\Entity\User\User;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

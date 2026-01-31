@@ -1,11 +1,11 @@
 <?php
 // src/Repository/CommissionRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Payment;
 
-use App\Entity\Commission;
-use App\Entity\Booking;
-use App\Entity\Prestataire;
+use App\Entity\Payment\Commission;
+use App\Entity\Booking\Booking;
+use App\Entity\User\Prestataire;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

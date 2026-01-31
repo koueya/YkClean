@@ -1,7 +1,7 @@
 <?php
 // src/Entity/Quote/QuoteItem.php
 
-namespace App\Quote\Entity;
+namespace App\Entity\Quote;
 
 use App\Repository\QuoteItemRepository;
 use Doctrine\ORM\Mapping as ORM;

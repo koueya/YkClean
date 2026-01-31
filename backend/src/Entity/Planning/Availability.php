@@ -1,7 +1,7 @@
 <?php
 // src/Entity/Planning/Availability.php
 
-namespace App\Planning\Entity;
+namespace  App\Entity\Planning;
 
 use App\Repository\AvailabilityRepository;
 use App\Entity\Planning\AvailableSlot;

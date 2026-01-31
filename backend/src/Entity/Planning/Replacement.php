@@ -1,7 +1,7 @@
 <?php
 // src/Entity/Planning/Replacement.php
 
-namespace App\Planning\Entity;
+namespace App\Entity\Planning;
 
 use App\Repository\ReplacementRepository;
 use Doctrine\ORM\Mapping as ORM;

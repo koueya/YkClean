@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Service;
+namespace App\Service\Payment;
 
 use App\Entity\Booking\Booking;
 use App\Entity\Payment\Payment;

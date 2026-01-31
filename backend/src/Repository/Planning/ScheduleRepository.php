@@ -1,10 +1,10 @@
 <?php
 // src/Repository/ScheduleRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Planning;
 
-use App\Entity\Schedule;
-use App\Entity\Prestataire;
+use App\Entity\Planning\Schedule;
+use App\Entity\User\Prestataire;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

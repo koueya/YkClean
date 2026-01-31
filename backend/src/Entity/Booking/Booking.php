@@ -7,6 +7,15 @@ use App\Repository\BookingRepository;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
+use App\Entity\Client\Client;
+use App\Entity\Prestataire\Prestataire;
+use App\Entity\ServiceRequest\ServiceRequest;
+use App\Entity\Quote\Quote;
+use App\Entity\User\User;
+use App\Entity\Payment\Payment;
+use App\Entity\Review\Review;
+use App\Entity\Booking\Recurrence;
+use App\Entity\Booking\Replacement;
 use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity(repositoryClass: BookingRepository::class)]

@@ -1,7 +1,7 @@
 <?php
 // src/Entity/Planning/Absence.php
 
-namespace App\Planning\Entity;
+namespace App\Entity\Planning;
 
 use App\Repository\AbsenceRepository;
 use App\Entity\Planning\Prestataire;

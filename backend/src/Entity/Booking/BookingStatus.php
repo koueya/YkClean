@@ -2,7 +2,8 @@
 // src/Entity/Booking/BookingStatus.php
 
 namespace App\Entity\Booking;
-
+use App\Entity\User\User;
+use App\Entity\Booking\Booking;
 use App\Repository\BookingStatusRepository;
 use Doctrine\ORM\Mapping as ORM;
 

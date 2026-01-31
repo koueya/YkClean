@@ -1,7 +1,7 @@
 <?php
 // src/Repository/QuoteItemRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Quote;
 
 use App\Entity\QuoteItem;
 use App\Entity\Quote;

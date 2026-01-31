@@ -541,11 +541,12 @@ enum UserRole: string
 
     /**
      * Conversion en chaîne
-     */
+     
     public function __toString(): string
     {
         return $this->value;
-    }
+    } 
+    */
 
     /**
      * Obtenir le nom court (sans ROLE_)

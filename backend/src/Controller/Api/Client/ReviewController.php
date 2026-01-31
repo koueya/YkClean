@@ -4,11 +4,11 @@ namespace App\Controller\Api\Client;
 
 use App\Entity\Rating\Review;
 use App\Entity\User\Client;
-use App\Repository\ReviewRepository;
-use App\Repository\BookingRepository;
-use App\Repository\PrestataireRepository;
-use App\Service\BookingService;
-use App\Service\NotificationService;
+use App\Repository\Booking\BookingRepository;
+use App\Repository\Rating\ReviewRepository;
+use App\Repository\User\PrestataireRepository;
+use App\Service\Booking\BookingService;
+use App\Service\Notification\NotificationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;

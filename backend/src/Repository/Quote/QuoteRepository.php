@@ -1,12 +1,12 @@
 <?php
 // src/Repository/QuoteRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Quote;
 
-use App\Entity\Quote;
-use App\Entity\ServiceRequest;
-use App\Entity\Prestataire;
-use App\Entity\Client;
+use App\Entity\Quote\Quote;
+use App\Entity\Service\ServiceRequest;
+use App\Entity\User\Prestataire;
+use App\Entity\User\Client;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

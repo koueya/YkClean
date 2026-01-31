@@ -1,12 +1,12 @@
 <?php
 // src/Repository/ReviewRepository.php
 
-namespace App\Repository;
+namespace App\Repository\Review;
 
-use App\Entity\Review;
-use App\Entity\Booking;
-use App\Entity\Client;
-use App\Entity\Prestataire;
+use App\Entity\Review\Review;
+use App\Entity\Booking\Booking;
+use App\Entity\User\Client;
+use App\Entity\User\Prestataire;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 

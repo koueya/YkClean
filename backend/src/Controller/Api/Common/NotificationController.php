@@ -2,10 +2,11 @@
 
 namespace App\Controller\Api\Common;
 
-use App\Service\NotificationService;
 use App\Entity\User\User;
 use App\Entity\Notification\Notification;
 use Doctrine\ORM\EntityManagerInterface;
+use App\Service\Notification\NotificationService;
+use App\Repository\Notification\NotificationRepository;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;

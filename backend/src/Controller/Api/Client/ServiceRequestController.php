@@ -9,7 +9,11 @@ use App\Repository\Booking\BookingRepository;
 use App\Repository\User\PrestataireRepository;
 use App\Service\Booking\BookingService;
 use App\Service\Notification\NotificationService;
-
+use App\Repository\Service\ServiceRequestRepository;
+use App\Service\Matching\MatchingService;
+use App\Service\User\ClientService;
+use App\Service\Payment\StripeService;
+use App\Entity\User\User;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;

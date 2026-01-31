@@ -6,11 +6,10 @@ use App\Entity\Booking\Booking;
 use App\Entity\Quote\Quote;
 use App\Entity\User\Client;
 use App\Repository\Booking\BookingRepository;
-use App\Repository\Invoice\InvoiceRepository;
-use App\Repository\Payment\PaymentRepository;
+use App\Repository\Quote\QuoteRepository;                    // ✅ AJOUTÉ
+use App\Repository\Service\ServiceRequestRepository;         // ✅ AJOUTÉ
+use App\Service\Booking\BookingService;                      // ✅ AJOUTÉ (renommé de BookingManager)
 use App\Service\Notification\NotificationService;
-use App\Service\Payment\PaymentService;
-
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -18,6 +17,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
+use Psr\Log\LoggerInterface;                                  // ✅ AJOUTÉ
 
 #[Route('/api/client/quotes')]
 #[IsGranted('ROLE_CLIENT')]
@@ -28,7 +28,8 @@ class QuoteController extends AbstractController
         private QuoteRepository $quoteRepository,
         private ServiceRequestRepository $serviceRequestRepository,
         private BookingService $bookingService,
-        private NotificationService $notificationService
+        private NotificationService $notificationService,
+        private LoggerInterface $logger                         // ✅ AJOUTÉ
     ) {
     }
 
@@ -61,6 +62,7 @@ class QuoteController extends AbstractController
         // Build query
         $queryBuilder = $this->quoteRepository->createQueryBuilder('q')
             ->leftJoin('q.serviceRequest', 'sr')
+            ->leftJoin('q.prestataire', 'p')
             ->where('sr.client = :client')
             ->setParameter('client', $client);
 
@@ -74,25 +76,13 @@ class QuoteController extends AbstractController
                 ->setParameter('serviceRequestId', $serviceRequestId);
         }
 
-        // Filter out expired quotes
-        $includeExpired = $request->query->get('includeExpired', 'false') === 'true';
-        if (!$includeExpired) {
-            $queryBuilder->andWhere('q.validUntil > :now OR q.validUntil IS NULL')
-                ->setParameter('now', new \DateTimeImmutable());
-        }
-
-        // Sorting
-        $allowedSortFields = ['createdAt', 'amount', 'proposedDate', 'status'];
-        if (in_array($sortBy, $allowedSortFields)) {
-            $queryBuilder->orderBy('q.' . $sortBy, $sortOrder === 'ASC' ? 'ASC' : 'DESC');
-        }
-
         // Count total
         $totalQuery = clone $queryBuilder;
         $total = count($totalQuery->getQuery()->getResult());
 
-        // Get paginated results
+        // Apply sorting and pagination
         $quotes = $queryBuilder
+            ->orderBy('q.' . $sortBy, $sortOrder)
             ->setFirstResult($offset)
             ->setMaxResults($limit)
             ->getQuery()
@@ -137,7 +127,7 @@ class QuoteController extends AbstractController
             ], Response::HTTP_NOT_FOUND);
         }
 
-        // Check ownership through service request
+        // Check ownership
         if ($quote->getServiceRequest()->getClient()->getId() !== $client->getId()) {
             return $this->json([
                 'error' => 'Access denied'
@@ -151,10 +141,52 @@ class QuoteController extends AbstractController
     }
 
     /**
-     * Accept a quote and create a booking
+     * Get all quotes for a specific service request
+     */
+    #[Route('/service-request/{serviceRequestId}', name: 'api_client_quotes_by_service_request', methods: ['GET'])]
+    public function getByServiceRequest(int $serviceRequestId): JsonResponse
+    {
+        /** @var Client $client */
+        $client = $this->getUser();
+
+        if (!$client instanceof Client) {
+            return $this->json([
+                'error' => 'User is not a client'
+            ], Response::HTTP_FORBIDDEN);
+        }
+
+        $serviceRequest = $this->serviceRequestRepository->find($serviceRequestId);
+
+        if (!$serviceRequest) {
+            return $this->json([
+                'error' => 'Service request not found'
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        // Check ownership
+        if ($serviceRequest->getClient()->getId() !== $client->getId()) {
+            return $this->json([
+                'error' => 'Access denied'
+            ], Response::HTTP_FORBIDDEN);
+        }
+
+        $quotes = $this->quoteRepository->findByServiceRequest($serviceRequest);
+
+        $data = array_map(function (Quote $quote) {
+            return $this->formatQuote($quote);
+        }, $quotes);
+
+        return $this->json([
+            'success' => true,
+            'data' => $data
+        ]);
+    }
+
+    /**
+     * Accept a quote
      */
     #[Route('/{id}/accept', name: 'api_client_quote_accept', methods: ['POST'])]
-    public function accept(int $id, Request $request): JsonResponse
+    public function accept(int $id): JsonResponse
     {
         /** @var Client $client */
         $client = $this->getUser();
@@ -180,108 +212,85 @@ class QuoteController extends AbstractController
             ], Response::HTTP_FORBIDDEN);
         }
 
-        // Check if quote is still valid
+        // Can only accept pending quotes
         if ($quote->getStatus() !== 'pending') {
             return $this->json([
-                'error' => 'Quote is no longer available'
+                'error' => 'Only pending quotes can be accepted'
             ], Response::HTTP_BAD_REQUEST);
         }
 
         // Check if quote has expired
         if ($quote->getValidUntil() && $quote->getValidUntil() < new \DateTimeImmutable()) {
             return $this->json([
-                'error' => 'Quote has expired'
+                'error' => 'This quote has expired'
             ], Response::HTTP_BAD_REQUEST);
         }
-
-        // Check if service request already has an accepted quote
-        $serviceRequest = $quote->getServiceRequest();
-        if ($serviceRequest->getStatus() === 'in_progress' || $serviceRequest->getStatus() === 'completed') {
-            return $this->json([
-                'error' => 'Service request already has an accepted quote'
-            ], Response::HTTP_BAD_REQUEST);
-        }
-
-        $data = json_decode($request->getContent(), true) ?? [];
-        
-        // Optional: client can specify a different date if alternatives were provided
-        $scheduledDate = $quote->getProposedDate();
-        if (isset($data['scheduledDate'])) {
-            try {
-                $scheduledDate = new \DateTimeImmutable($data['scheduledDate']);
-            } catch (\Exception $e) {
-                return $this->json([
-                    'error' => 'Invalid scheduled date format'
-                ], Response::HTTP_BAD_REQUEST);
-            }
-        }
-
-        // Optional: client can specify time
-        $scheduledTime = $data['scheduledTime'] ?? null;
 
         try {
-            // Begin transaction
-            $this->entityManager->beginTransaction();
-
             // Update quote status
             $quote->setStatus('accepted');
             $quote->setAcceptedAt(new \DateTimeImmutable());
 
-            // Create booking
-            $booking = $this->bookingService->createBookingFromQuote(
-                $quote,
-                $scheduledDate,
-                $scheduledTime
-            );
+            // Reject all other quotes for this service request
+            $serviceRequest = $quote->getServiceRequest();
+            $otherQuotes = $this->quoteRepository->createQueryBuilder('q')
+                ->where('q.serviceRequest = :serviceRequest')
+                ->andWhere('q.id != :quoteId')
+                ->andWhere('q.status = :status')
+                ->setParameter('serviceRequest', $serviceRequest)
+                ->setParameter('quoteId', $quote->getId())
+                ->setParameter('status', 'pending')
+                ->getQuery()
+                ->getResult();
+
+            foreach ($otherQuotes as $otherQuote) {
+                $otherQuote->setStatus('rejected');
+                $otherQuote->setRejectionReason('Another quote was accepted');
+            }
 
             // Update service request status
             $serviceRequest->setStatus('in_progress');
-            $serviceRequest->setUpdatedAt(new \DateTimeImmutable());
 
-            // Reject all other pending quotes for this service request
-            foreach ($serviceRequest->getQuotes() as $otherQuote) {
-                if ($otherQuote->getId() !== $quote->getId() && $otherQuote->getStatus() === 'pending') {
-                    $otherQuote->setStatus('rejected');
-                    $otherQuote->setRejectionReason('Client accepted another quote');
-                }
-            }
+            // Create booking from quote
+            $booking = $this->bookingService->createFromQuote($quote, $client);
 
             $this->entityManager->flush();
-            $this->entityManager->commit();
 
             // Send notifications
             try {
-                // Notify the selected prestataire
                 $this->notificationService->notifyQuoteAccepted($quote);
+                $this->notificationService->notifyBookingCreated($booking);
                 
                 // Notify rejected prestataires
-                foreach ($serviceRequest->getQuotes() as $rejectedQuote) {
-                    if ($rejectedQuote->getId() !== $quote->getId() && $rejectedQuote->getStatus() === 'rejected') {
-                        $this->notificationService->notifyQuoteRejected($rejectedQuote);
-                    }
+                foreach ($otherQuotes as $otherQuote) {
+                    $this->notificationService->notifyQuoteRejected($otherQuote);
                 }
             } catch (\Exception $e) {
-                // Log error but don't fail the request
+                $this->logger->error('Failed to send quote acceptance notifications', [
+                    'quote_id' => $quote->getId(),
+                    'error' => $e->getMessage()
+                ]);
             }
 
             return $this->json([
                 'success' => true,
-                'message' => 'Quote accepted and booking created successfully',
+                'message' => 'Quote accepted successfully',
                 'data' => [
                     'quote' => $this->formatQuote($quote),
                     'booking' => [
                         'id' => $booking->getId(),
                         'scheduledDate' => $booking->getScheduledDate()?->format('c'),
-                        'scheduledTime' => $booking->getScheduledTime(),
-                        'status' => $booking->getStatus(),
-                        'amount' => $booking->getAmount(),
+                        'status' => $booking->getStatus()
                     ]
                 ]
-            ], Response::HTTP_CREATED);
+            ]);
 
         } catch (\Exception $e) {
-            $this->entityManager->rollback();
-            
+            $this->logger->error('Failed to accept quote', [
+                'quote_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
             return $this->json([
                 'error' => 'Failed to accept quote',
                 'message' => $e->getMessage()
@@ -319,118 +328,52 @@ class QuoteController extends AbstractController
             ], Response::HTTP_FORBIDDEN);
         }
 
-        // Check if quote can be rejected
+        // Can only reject pending quotes
         if ($quote->getStatus() !== 'pending') {
             return $this->json([
-                'error' => 'Quote cannot be rejected'
+                'error' => 'Only pending quotes can be rejected'
             ], Response::HTTP_BAD_REQUEST);
-        }
-
-        $data = json_decode($request->getContent(), true) ?? [];
-        $reason = $data['reason'] ?? 'Client rejected the quote';
-
-        $quote->setStatus('rejected');
-        $quote->setRejectionReason($reason);
-        $quote->setRejectedAt(new \DateTimeImmutable());
-
-        $this->entityManager->flush();
-
-        // Notify prestataire
-        try {
-            $this->notificationService->notifyQuoteRejected($quote);
-        } catch (\Exception $e) {
-            // Log error but don't fail
-        }
-
-        return $this->json([
-            'success' => true,
-            'message' => 'Quote rejected successfully',
-            'data' => $this->formatQuote($quote)
-        ]);
-    }
-
-    /**
-     * Compare multiple quotes
-     */
-    #[Route('/compare', name: 'api_client_quotes_compare', methods: ['POST'])]
-    public function compare(Request $request): JsonResponse
-    {
-        /** @var Client $client */
-        $client = $this->getUser();
-
-        if (!$client instanceof Client) {
-            return $this->json([
-                'error' => 'User is not a client'
-            ], Response::HTTP_FORBIDDEN);
         }
 
         $data = json_decode($request->getContent(), true);
+        $reason = $data['reason'] ?? 'No reason provided';
 
-        if (!isset($data['quoteIds']) || !is_array($data['quoteIds']) || empty($data['quoteIds'])) {
-            return $this->json([
-                'error' => 'Quote IDs array is required'
-            ], Response::HTTP_BAD_REQUEST);
-        }
+        try {
+            $quote->setStatus('rejected');
+            $quote->setRejectionReason($reason);
+            $quote->setRejectedAt(new \DateTimeImmutable());
 
-        // Limit comparison to 5 quotes
-        if (count($data['quoteIds']) > 5) {
-            return $this->json([
-                'error' => 'Can only compare up to 5 quotes at once'
-            ], Response::HTTP_BAD_REQUEST);
-        }
+            $this->entityManager->flush();
 
-        $quotes = $this->quoteRepository->findBy(['id' => $data['quoteIds']]);
-
-        if (empty($quotes)) {
-            return $this->json([
-                'error' => 'No quotes found'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        // Verify ownership and that all quotes are for the same service request
-        $serviceRequestId = null;
-        foreach ($quotes as $quote) {
-            if ($quote->getServiceRequest()->getClient()->getId() !== $client->getId()) {
-                return $this->json([
-                    'error' => 'Access denied to one or more quotes'
-                ], Response::HTTP_FORBIDDEN);
+            // Notify prestataire
+            try {
+                $this->notificationService->notifyQuoteRejected($quote);
+            } catch (\Exception $e) {
+                $this->logger->error('Failed to send quote rejection notification', [
+                    'quote_id' => $quote->getId(),
+                    'error' => $e->getMessage()
+                ]);
             }
 
-            if ($serviceRequestId === null) {
-                $serviceRequestId = $quote->getServiceRequest()->getId();
-            } elseif ($serviceRequestId !== $quote->getServiceRequest()->getId()) {
-                return $this->json([
-                    'error' => 'All quotes must be from the same service request'
-                ], Response::HTTP_BAD_REQUEST);
-            }
+            return $this->json([
+                'success' => true,
+                'message' => 'Quote rejected successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to reject quote', [
+                'quote_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return $this->json([
+                'error' => 'Failed to reject quote'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
-
-        // Format quotes for comparison
-        $comparison = [
-            'serviceRequest' => [
-                'id' => $serviceRequestId,
-                'category' => $quotes[0]->getServiceRequest()->getCategory(),
-                'description' => $quotes[0]->getServiceRequest()->getDescription(),
-            ],
-            'quotes' => array_map(function (Quote $quote) {
-                return $this->formatQuote($quote, true);
-            }, $quotes),
-            'statistics' => [
-                'averageAmount' => $this->calculateAverage($quotes, 'getAmount'),
-                'lowestAmount' => $this->calculateMin($quotes, 'getAmount'),
-                'highestAmount' => $this->calculateMax($quotes, 'getAmount'),
-                'averageDuration' => $this->calculateAverage($quotes, 'getProposedDuration'),
-            ]
-        ];
-
-        return $this->json([
-            'success' => true,
-            'data' => $comparison
-        ]);
     }
 
     /**
-     * Request quote modification
+     * Request modification to a quote
      */
     #[Route('/{id}/request-modification', name: 'api_client_quote_request_modification', methods: ['POST'])]
     public function requestModification(int $id, Request $request): JsonResponse
@@ -474,32 +417,47 @@ class QuoteController extends AbstractController
             ], Response::HTTP_BAD_REQUEST);
         }
 
-        // Store modification request
-        $quote->setModificationRequested(true);
-        $quote->setModificationMessage($data['message']);
-        $quote->setModificationRequestedAt(new \DateTimeImmutable());
-
-        $this->entityManager->flush();
-
-        // Notify prestataire
         try {
-            $this->notificationService->notifyQuoteModificationRequested($quote);
-        } catch (\Exception $e) {
-            // Log error but don't fail
-        }
+            // Store modification request
+            $quote->setModificationRequested(true);
+            $quote->setModificationMessage($data['message']);
+            $quote->setModificationRequestedAt(new \DateTimeImmutable());
 
-        return $this->json([
-            'success' => true,
-            'message' => 'Modification request sent to prestataire',
-            'data' => $this->formatQuote($quote)
-        ]);
+            $this->entityManager->flush();
+
+            // Notify prestataire
+            try {
+                $this->notificationService->notifyQuoteModificationRequested($quote);
+            } catch (\Exception $e) {
+                $this->logger->error('Failed to send modification request notification', [
+                    'quote_id' => $quote->getId(),
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+            return $this->json([
+                'success' => true,
+                'message' => 'Modification request sent to prestataire',
+                'data' => $this->formatQuote($quote)
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to request quote modification', [
+                'quote_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return $this->json([
+                'error' => 'Failed to request modification'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**
-     * Get quote statistics for client
+     * Compare quotes for a service request
      */
-    #[Route('/stats', name: 'api_client_quotes_stats', methods: ['GET'])]
-    public function getStats(): JsonResponse
+    #[Route('/compare/{serviceRequestId}', name: 'api_client_quotes_compare', methods: ['GET'])]
+    public function compare(int $serviceRequestId): JsonResponse
     {
         /** @var Client $client */
         $client = $this->getUser();
@@ -510,57 +468,68 @@ class QuoteController extends AbstractController
             ], Response::HTTP_FORBIDDEN);
         }
 
-        // Get all quotes for this client
-        $allQuotes = $this->quoteRepository->createQueryBuilder('q')
-            ->leftJoin('q.serviceRequest', 'sr')
-            ->where('sr.client = :client')
-            ->setParameter('client', $client)
-            ->getQuery()
-            ->getResult();
+        $serviceRequest = $this->serviceRequestRepository->find($serviceRequestId);
 
-        $stats = [
-            'totalQuotes' => count($allQuotes),
-            'pendingQuotes' => 0,
-            'acceptedQuotes' => 0,
-            'rejectedQuotes' => 0,
-            'expiredQuotes' => 0,
-            'averageQuotesPerRequest' => 0,
-            'averageResponseTime' => null, // TODO: Calculate based on quote creation time vs service request creation time
-        ];
-
-        foreach ($allQuotes as $quote) {
-            switch ($quote->getStatus()) {
-                case 'pending':
-                    // Check if expired
-                    if ($quote->getValidUntil() && $quote->getValidUntil() < new \DateTimeImmutable()) {
-                        $stats['expiredQuotes']++;
-                    } else {
-                        $stats['pendingQuotes']++;
-                    }
-                    break;
-                case 'accepted':
-                    $stats['acceptedQuotes']++;
-                    break;
-                case 'rejected':
-                    $stats['rejectedQuotes']++;
-                    break;
-            }
+        if (!$serviceRequest) {
+            return $this->json([
+                'error' => 'Service request not found'
+            ], Response::HTTP_NOT_FOUND);
         }
 
-        // Calculate average quotes per request
-        $serviceRequestsCount = $this->serviceRequestRepository->count(['client' => $client]);
-        if ($serviceRequestsCount > 0) {
-            $stats['averageQuotesPerRequest'] = round($stats['totalQuotes'] / $serviceRequestsCount, 2);
+        // Check ownership
+        if ($serviceRequest->getClient()->getId() !== $client->getId()) {
+            return $this->json([
+                'error' => 'Access denied'
+            ], Response::HTTP_FORBIDDEN);
         }
+
+        $quotes = $this->quoteRepository->findByServiceRequest($serviceRequest);
+
+        // Format quotes for comparison
+        $comparison = array_map(function (Quote $quote) {
+            $prestataire = $quote->getPrestataire();
+            
+            return [
+                'id' => $quote->getId(),
+                'amount' => $quote->getAmount(),
+                'proposedDate' => $quote->getProposedDate()?->format('c'),
+                'proposedDuration' => $quote->getProposedDuration(),
+                'status' => $quote->getStatus(),
+                'description' => $quote->getDescription(),
+                'validUntil' => $quote->getValidUntil()?->format('c'),
+                'createdAt' => $quote->getCreatedAt()?->format('c'),
+                'prestataire' => [
+                    'id' => $prestataire->getId(),
+                    'firstName' => $prestataire->getFirstName(),
+                    'lastName' => $prestataire->getLastName(),
+                    'averageRating' => $prestataire->getAverageRating(),
+                    'totalReviews' => $prestataire->getTotalReviews(),
+                    'completedBookings' => $prestataire->getCompletedBookingsCount(),
+                ],
+            ];
+        }, $quotes);
 
         return $this->json([
             'success' => true,
-            'data' => $stats
+            'data' => [
+                'serviceRequest' => [
+                    'id' => $serviceRequest->getId(),
+                    'category' => $serviceRequest->getCategory()?->getName(),
+                    'description' => $serviceRequest->getDescription(),
+                ],
+                'quotes' => $comparison,
+                'stats' => [
+                    'totalQuotes' => count($quotes),
+                    'averageAmount' => count($quotes) > 0 ? array_sum(array_column($comparison, 'amount')) / count($quotes) : 0,
+                    'minAmount' => count($quotes) > 0 ? min(array_column($comparison, 'amount')) : 0,
+                    'maxAmount' => count($quotes) > 0 ? max(array_column($comparison, 'amount')) : 0,
+                ]
+            ]
         ]);
     }
 
     /**
-     * Format quote data for response
+     * Format quote for JSON response
      */
     private function formatQuote(Quote $quote, bool $detailed = false): array
     {
@@ -572,84 +541,33 @@ class QuoteController extends AbstractController
             'amount' => $quote->getAmount(),
             'proposedDate' => $quote->getProposedDate()?->format('c'),
             'proposedDuration' => $quote->getProposedDuration(),
-            'description' => $quote->getDescription(),
             'status' => $quote->getStatus(),
             'validUntil' => $quote->getValidUntil()?->format('c'),
-            'isExpired' => $quote->getValidUntil() && $quote->getValidUntil() < new \DateTimeImmutable(),
             'createdAt' => $quote->getCreatedAt()?->format('c'),
             'prestataire' => [
                 'id' => $prestataire->getId(),
                 'firstName' => $prestataire->getFirstName(),
                 'lastName' => $prestataire->getLastName(),
                 'averageRating' => $prestataire->getAverageRating(),
-                'completedBookings' => $prestataire->getCompletedBookings(),
-                'profilePicture' => $prestataire->getProfilePicture(),
             ],
-            'serviceRequest' => [
-                'id' => $serviceRequest->getId(),
-                'category' => $serviceRequest->getCategory(),
-                'description' => $serviceRequest->getDescription(),
-            ]
         ];
 
         if ($detailed) {
+            $data['description'] = $quote->getDescription();
             $data['conditions'] = $quote->getConditions();
-            $data['alternativeDates'] = array_map(
-                fn($date) => $date->format('c'),
-                $quote->getAlternativeDates() ?? []
-            );
-            $data['includesProducts'] = $quote->getIncludesProducts();
-            $data['equipmentNeeded'] = $quote->getEquipmentNeeded();
-            
-            if ($quote->getStatus() === 'accepted') {
-                $data['acceptedAt'] = $quote->getAcceptedAt()?->format('c');
-            }
-            
-            if ($quote->getStatus() === 'rejected') {
-                $data['rejectionReason'] = $quote->getRejectionReason();
-                $data['rejectedAt'] = $quote->getRejectedAt()?->format('c');
-            }
-
-            if ($quote->isModificationRequested()) {
-                $data['modificationRequested'] = true;
-                $data['modificationMessage'] = $quote->getModificationMessage();
-                $data['modificationRequestedAt'] = $quote->getModificationRequestedAt()?->format('c');
-            }
-
-            // Add more prestataire details
-            $data['prestataire']['phone'] = $prestataire->getPhone();
-            $data['prestataire']['serviceCategories'] = $prestataire->getServiceCategories();
-            $data['prestataire']['hourlyRate'] = $prestataire->getHourlyRate();
-            $data['prestataire']['isVerified'] = $prestataire->isVerified();
+            $data['acceptedAt'] = $quote->getAcceptedAt()?->format('c');
+            $data['rejectedAt'] = $quote->getRejectedAt()?->format('c');
+            $data['rejectionReason'] = $quote->getRejectionReason();
+            $data['modificationRequested'] = $quote->isModificationRequested();
+            $data['modificationMessage'] = $quote->getModificationMessage();
+            $data['serviceRequest'] = [
+                'id' => $serviceRequest->getId(),
+                'category' => $serviceRequest->getCategory()?->getName(),
+                'description' => $serviceRequest->getDescription(),
+                'preferredDate' => $serviceRequest->getPreferredDate()?->format('c'),
+            ];
         }
 
         return $data;
-    }
-
-    /**
-     * Calculate average of a property across quotes
-     */
-    private function calculateAverage(array $quotes, string $method): ?float
-    {
-        $values = array_filter(array_map(fn($q) => $q->$method(), $quotes));
-        return empty($values) ? null : round(array_sum($values) / count($values), 2);
-    }
-
-    /**
-     * Calculate minimum of a property across quotes
-     */
-    private function calculateMin(array $quotes, string $method): ?float
-    {
-        $values = array_filter(array_map(fn($q) => $q->$method(), $quotes));
-        return empty($values) ? null : min($values);
-    }
-
-    /**
-     * Calculate maximum of a property across quotes
-     */
-    private function calculateMax(array $quotes, string $method): ?float
-    {
-        $values = array_filter(array_map(fn($q) => $q->$method(), $quotes));
-        return empty($values) ? null : max($values);
     }
 }

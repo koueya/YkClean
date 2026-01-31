@@ -2,9 +2,9 @@
 
 namespace App\Controller\Api\Prestataire;
 
-use App\Service\Planning\PlanningService;
+use App\Service\Planning\AvailabilityService;
 use App\Service\Notification\NotificationService;
-use App\Service\Replacement\ReplacementService;
+use App\Service\Planning\ReplacementService;
 use App\DTO\CreateAbsenceDTO;
 use App\DTO\UpdateAbsenceDTO;
 use App\Entity\User\Prestataire;
@@ -23,28 +23,14 @@ use Psr\Log\LoggerInterface;
 #[IsGranted('ROLE_PRESTATAIRE')]
 class AbsenceController extends AbstractController
 {
-    private PlanningService $planningService;
-    private NotificationService $notificationService;
-    private ReplacementService $replacementService;
-    private EntityManagerInterface $entityManager;
-    private ValidatorInterface $validator;
-    private LoggerInterface $logger;
-
     public function __construct(
-        PlanningService $planningService,
-        NotificationService $notificationService,
-        ReplacementService $replacementService,
-        EntityManagerInterface $entityManager,
-        ValidatorInterface $validator,
-        LoggerInterface $logger
-    ) {
-        $this->planningService = $planningService;
-        $this->notificationService = $notificationService;
-        $this->replacementService = $replacementService;
-        $this->entityManager = $entityManager;
-        $this->validator = $validator;
-        $this->logger = $logger;
-    }
+        private AvailabilityService $availabilityService,
+        private NotificationService $notificationService,
+        private ReplacementService $replacementService,
+        private EntityManagerInterface $entityManager,
+        private ValidatorInterface $validator,
+        private LoggerInterface $logger
+    ) {}
 
     /**
      * Déclarer une absence
@@ -93,14 +79,14 @@ class AbsenceController extends AbstractController
             }
 
             // Vérifier les réservations existantes dans la période
-            $affectedBookings = $this->planningService->getBookingsInPeriod(
+            $affectedBookings = $this->availabilityService->getBookingsInPeriod(
                 $prestataire,
                 $dto->getStartDateAsDateTime(),
                 $dto->getEndDateAsDateTime()
             );
 
             // Créer l'absence
-            $absence = $this->planningService->createAbsence($prestataire, $dto);
+            $absence = $this->availabilityService->createAbsence($prestataire, $dto);
 
             $this->logger->info('Absence created', [
                 'absence_id' => $absence->getId(),
@@ -276,7 +262,7 @@ class AbsenceController extends AbstractController
             }
 
             // Récupérer les réservations affectées
-            $affectedBookings = $this->planningService->getBookingsInPeriod(
+            $affectedBookings = $this->availabilityService->getBookingsInPeriod(
                 $prestataire,
                 $absence->getStartDate(),
                 $absence->getEndDate()
@@ -404,7 +390,7 @@ class AbsenceController extends AbstractController
             }
 
             // Mettre à jour l'absence
-            $this->planningService->updateAbsence($absence, $dto);
+            $this->availabilityService->updateAbsence($absence, $dto);
 
             $this->logger->info('Absence updated', [
                 'absence_id' => $absence->getId(),
@@ -483,7 +469,7 @@ class AbsenceController extends AbstractController
             }
 
             // Annuler l'absence
-            $this->planningService->cancelAbsence($absence);
+            $this->availabilityService->cancelAbsence($absence);
 
             // Notifier les clients des réservations qui étaient en remplacement
             $this->notificationService->notifyAbsenceCancelled($absence);
@@ -541,14 +527,14 @@ class AbsenceController extends AbstractController
             $endDate = new \DateTime($data['end_date']);
 
             // Vérifier les réservations dans la période
-            $affectedBookings = $this->planningService->getBookingsInPeriod(
+            $affectedBookings = $this->availabilityService->getBookingsInPeriod(
                 $prestataire,
                 $startDate,
                 $endDate
             );
 
             // Vérifier les absences existantes
-            $existingAbsences = $this->planningService->getAbsencesInPeriod(
+            $existingAbsences = $this->availabilityService->getAbsencesInPeriod(
                 $prestataire,
                 $startDate,
                 $endDate

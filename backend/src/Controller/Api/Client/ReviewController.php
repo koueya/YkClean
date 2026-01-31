@@ -2,10 +2,10 @@
 
 namespace App\Controller\Api\Client;
 
-use App\Entity\Rating\Review;
+use App\Entity\Review\Review;
 use App\Entity\User\Client;
 use App\Repository\Booking\BookingRepository;
-use App\Repository\Rating\ReviewRepository;
+use App\Repository\Review\ReviewRepository;
 use App\Repository\User\PrestataireRepository;
 use App\Service\Booking\BookingService;
 use App\Service\Notification\NotificationService;

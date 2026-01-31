@@ -1,68 +1,79 @@
 <?php
-// src/Entity/Planning/Absence.php
 
 namespace App\Entity\Planning;
 
-use App\Repository\AbsenceRepository;
-use App\Entity\Planning\Prestataire;
+use App\Entity\User\Prestataire;
 use Doctrine\ORM\Mapping as ORM;
-use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Serializer\Annotation\Groups;
 
-#[ORM\Entity(repositoryClass: AbsenceRepository::class)]
+#[ORM\Entity]
 #[ORM\Table(name: 'absences')]
 class Absence
 {
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column(type: 'integer')]
+    #[Groups(['absence:read'])]
     private ?int $id = null;
 
-    #[ORM\ManyToOne(targetEntity: Prestataire::class, inversedBy: 'absences')]
+    #[ORM\ManyToOne(targetEntity: Prestataire::class)]
     #[ORM\JoinColumn(nullable: false)]
-    private ?Prestataire $prestataire = null;
+    private Prestataire $prestataire;
 
     #[ORM\Column(type: 'date')]
-    #[Assert\NotBlank]
-    private ?\DateTimeInterface $startDate = null;
+    #[Groups(['absence:read'])]
+    private \DateTimeInterface $startDate;
 
     #[ORM\Column(type: 'date')]
-    #[Assert\NotBlank]
-    private ?\DateTimeInterface $endDate = null;
+    #[Groups(['absence:read'])]
+    private \DateTimeInterface $endDate;
 
-    #[ORM\Column(type: 'string', length: 255)]
-    #[Assert\NotBlank]
-    private ?string $reason = null;
+    #[ORM\Column(type: 'string', length: 50)]
+    #[Groups(['absence:read'])]
+    private string $reason;
 
     #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $notes = null;
+    #[Groups(['absence:read'])]
+    private ?string $description = null;
+
+    #[ORM\Column(type: 'string', length: 20)]
+    #[Groups(['absence:read'])]
+    private string $status = 'active'; // active, cancelled
 
     #[ORM\Column(type: 'datetime_immutable')]
-    private ?\DateTimeImmutable $createdAt = null;
+    #[Groups(['absence:read'])]
+    private \DateTimeImmutable $createdAt;
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    #[Groups(['absence:read'])]
+    private ?\DateTimeImmutable $updatedAt = null;
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    #[Groups(['absence:read'])]
+    private ?\DateTimeImmutable $cancelledAt = null;
 
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
     }
 
-    // Getters and Setters
-
     public function getId(): ?int
     {
         return $this->id;
     }
 
-    public function getPrestataire(): ?Prestataire
+    public function getPrestataire(): Prestataire
     {
         return $this->prestataire;
     }
 
-    public function setPrestataire(?Prestataire $prestataire): self
+    public function setPrestataire(Prestataire $prestataire): self
     {
         $this->prestataire = $prestataire;
         return $this;
     }
 
-    public function getStartDate(): ?\DateTimeInterface
+    public function getStartDate(): \DateTimeInterface
     {
         return $this->startDate;
     }
@@ -73,7 +84,7 @@ class Absence
         return $this;
     }
 
-    public function getEndDate(): ?\DateTimeInterface
+    public function getEndDate(): \DateTimeInterface
     {
         return $this->endDate;
     }
@@ -84,7 +95,7 @@ class Absence
         return $this;
     }
 
-    public function getReason(): ?string
+    public function getReason(): string
     {
         return $this->reason;
     }
@@ -95,37 +106,62 @@ class Absence
         return $this;
     }
 
-    public function getNotes(): ?string
+    public function getDescription(): ?string
     {
-        return $this->notes;
+        return $this->description;
     }
 
-    public function setNotes(?string $notes): self
+    public function setDescription(?string $description): self
     {
-        $this->notes = $notes;
+        $this->description = $description;
         return $this;
     }
 
-    public function getCreatedAt(): ?\DateTimeImmutable
+    public function getStatus(): string
+    {
+        return $this->status;
+    }
+
+    public function setStatus(string $status): self
+    {
+        $this->status = $status;
+        return $this;
+    }
+
+    public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
     }
 
-    public function setCreatedAt(\DateTimeImmutable $createdAt): self
+    public function getUpdatedAt(): ?\DateTimeImmutable
     {
-        $this->createdAt = $createdAt;
+        return $this->updatedAt;
+    }
+
+    public function setUpdatedAt(?\DateTimeImmutable $updatedAt): self
+    {
+        $this->updatedAt = $updatedAt;
         return $this;
     }
 
-    public function isActive(\DateTimeInterface $date = null): bool
+    public function getCancelledAt(): ?\DateTimeImmutable
     {
-        $date = $date ?? new \DateTime();
-        return $date >= $this->startDate && $date <= $this->endDate;
+        return $this->cancelledAt;
     }
 
-    public function getDuration(): int
+    public function setCancelledAt(?\DateTimeImmutable $cancelledAt): self
     {
-        $diff = $this->startDate->diff($this->endDate);
-        return $diff->days + 1;
+        $this->cancelledAt = $cancelledAt;
+        return $this;
+    }
+
+    public function isActive(): bool
+    {
+        return $this->status === 'active';
+    }
+
+    public function isCancelled(): bool
+    {
+        return $this->status === 'cancelled';
     }
 }

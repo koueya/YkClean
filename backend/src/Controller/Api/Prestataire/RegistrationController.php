@@ -5,10 +5,9 @@ namespace App\Controller\Api\Prestataire;
 use App\Entity\User\Prestataire;
 use App\Repository\User\PrestataireRepository;
 use App\Repository\Service\ServiceCategoryRepository;
-use App\Repository\Booking\QuoteRepository;
 use App\Service\Payment\StripeService;
 use App\Service\Notification\NotificationService;
-use App\Service\Email\EmailVerificationService;
+use App\Service\Notification\EmailService;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -30,7 +29,7 @@ class RegistrationController extends AbstractController
         private UserPasswordHasherInterface $passwordHasher,
         private StripeService $stripeService,
         private NotificationService $notificationService,
-        private EmailVerificationService $emailVerificationService,
+        private EmailService $emailService,
         private ValidatorInterface $validator,
         private LoggerInterface $logger
     ) {
@@ -146,7 +145,7 @@ class RegistrationController extends AbstractController
             ]);
 
             // Envoyer l'email de vérification
-            $this->emailVerificationService->sendVerificationEmail($prestataire);
+            $this->emailService->sendEmailVerification($prestataire);
 
             return $this->json([
                 'success' => true,
@@ -398,6 +397,9 @@ class RegistrationController extends AbstractController
                 'prestataire_id' => $prestataire->getId(),
             ]);
 
+            // Envoyer l'email de bienvenue après vérification
+            $this->emailService->sendWelcomeEmail($prestataire);
+
             return $this->json([
                 'success' => true,
                 'message' => 'Email vérifié avec succès',
@@ -458,7 +460,7 @@ class RegistrationController extends AbstractController
             $this->entityManager->flush();
 
             // Envoyer l'email
-            $this->emailVerificationService->sendVerificationEmail($prestataire);
+            $this->emailService->sendEmailVerification($prestataire);
 
             $this->logger->info('Verification email resent', [
                 'prestataire_id' => $prestataire->getId(),
@@ -608,7 +610,7 @@ class RegistrationController extends AbstractController
             }
 
             // Notifier l'admin pour approbation
-            $this->notificationService->notifyNewPrestataireRegistration($prestataire);
+            $this->emailService->sendNewPrestataireRegistrationNotification($prestataire);
 
             $this->logger->info('Prestataire onboarding completed', [
                 'prestataire_id' => $prestataire->getId(),

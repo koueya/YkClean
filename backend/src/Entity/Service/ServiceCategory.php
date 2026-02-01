@@ -1,47 +1,56 @@
 <?php
+// src/Entity/Service/ServiceCategory.php
 
 namespace App\Entity\Service;
 
+use App\Entity\User\Prestataire;
+use App\Module\Financial\Entity\CommissionRule;
+use App\Repository\Service\ServiceCategoryRepository;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
-use Symfony\Component\Serializer\Annotation\Groups;
-use Symfony\Component\Validator\Constraints as Assert;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
-use App\Entity\ServiceRequest\ServiceRequest;
+use Symfony\Component\Serializer\Annotation\Groups;
+use Symfony\Component\String\Slugger\SluggerInterface;
+use Symfony\Component\Validator\Constraints as Assert;
 
 /**
- * Représente une catégorie de service avec support des sous-catégories
+ * Représente une catégorie de service avec support hiérarchique
  * 
  * Exemples de hiérarchie :
- * - Ménage (parent)
- *   ├── Ménage courant (enfant)
- *   ├── Grand ménage (enfant)
- *   └── Ménage après travaux (enfant)
- * 
- * - Repassage (parent)
- *   ├── Repassage standard (enfant)
- *   └── Repassage délicat (enfant)
+ * - Nettoyage (niveau 0 - racine)
+ *   ├── Entretien courant (niveau 1)
+ *   │   ├── Nettoyage léger (subcategory)
+ *   │   └── Nettoyage standard (subcategory)
+ *   ├── Grand ménage (niveau 1)
+ *   │   ├── Grand ménage classique (subcategory)
+ *   │   └── Grand ménage avec vitres (subcategory)
+ *   └── Nettoyage spécialisé (niveau 1)
+ *       ├── Nettoyage après travaux (subcategory)
+ *       └── Nettoyage de fin de bail (subcategory)
  */
-#[ORM\Entity(repositoryClass: 'App\Repository\Service\ServiceCategoryRepository')]
+#[ORM\Entity(repositoryClass: ServiceCategoryRepository::class)]
 #[ORM\Table(name: 'service_categories')]
-#[ORM\Index(columns: ['slug'], name: 'idx_slug')]
-#[ORM\Index(columns: ['parent_id'], name: 'idx_parent')]
-#[ORM\Index(columns: ['is_active'], name: 'idx_active')]
+#[ORM\Index(columns: ['slug'], name: 'idx_category_slug')]
+#[ORM\Index(columns: ['parent_id'], name: 'idx_category_parent')]
+#[ORM\Index(columns: ['is_active'], name: 'idx_category_active')]
+#[ORM\Index(columns: ['level'], name: 'idx_category_level')]
 #[UniqueEntity(fields: ['slug'], message: 'Ce slug existe déjà')]
 #[ORM\HasLifecycleCallbacks]
 class ServiceCategory
 {
     #[ORM\Id]
     #[ORM\GeneratedValue]
-    #[ORM\Column(type: 'integer')]
-    #[Groups(['category:read', 'category:list'])]
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Groups(['category:read', 'category:list', 'category:detail'])]
     private ?int $id = null;
 
-    /**
-     * Nom de la catégorie
-     */
-    #[ORM\Column(type: 'string', length: 100)]
+    // ============================================
+    // INFORMATIONS DE BASE
+    // ============================================
+
+    #[ORM\Column(type: Types::STRING, length: 100)]
     #[Assert\NotBlank(message: 'Le nom de la catégorie est obligatoire')]
     #[Assert\Length(
         min: 2,
@@ -49,210 +58,166 @@ class ServiceCategory
         minMessage: 'Le nom doit contenir au moins {{ limit }} caractères',
         maxMessage: 'Le nom ne peut pas dépasser {{ limit }} caractères'
     )]
-    #[Groups(['category:read', 'category:list'])]
+    #[Groups(['category:read', 'category:list', 'category:detail'])]
     private ?string $name = null;
 
-    /**
-     * Slug pour l'URL (généré automatiquement depuis le nom)
-     */
-    #[ORM\Column(type: 'string', length: 100, unique: true)]
-    #[Groups(['category:read', 'category:list'])]
+    #[ORM\Column(type: Types::STRING, length: 100, unique: true)]
+    #[Groups(['category:read', 'category:list', 'category:detail'])]
     private ?string $slug = null;
 
-    /**
-     * Description de la catégorie
-     */
-    #[ORM\Column(type: 'text', nullable: true)]
-    #[Groups(['category:read'])]
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
+    #[Assert\Length(max: 1000, maxMessage: 'La description ne peut pas dépasser {{ limit }} caractères')]
+    #[Groups(['category:read', 'category:detail'])]
     private ?string $description = null;
 
-    /**
-     * Icône de la catégorie (nom du fichier ou classe CSS)
-     */
-    #[ORM\Column(type: 'string', length: 100, nullable: true)]
+    // ============================================
+    // AFFICHAGE ET VISIBILITÉ
+    // ============================================
+
+    #[ORM\Column(type: Types::STRING, length: 50, nullable: true)]
     #[Groups(['category:read', 'category:list'])]
     private ?string $icon = null;
 
-    /**
-     * Image de la catégorie
-     */
-    #[ORM\Column(type: 'string', length: 255, nullable: true)]
+    #[ORM\Column(type: Types::STRING, length: 255, nullable: true)]
     #[Groups(['category:read', 'category:list'])]
     private ?string $image = null;
 
-    /**
-     * Couleur associée à la catégorie (hex)
-     */
-    #[ORM\Column(type: 'string', length: 7, nullable: true)]
-    #[Assert\Regex(
-        pattern: '/^#[0-9A-Fa-f]{6}$/',
-        message: 'La couleur doit être au format hexadécimal (#RRGGBB)'
-    )]
+    #[ORM\Column(type: Types::STRING, length: 20, nullable: true)]
+    #[Assert\Regex(pattern: '/^#[0-9A-Fa-f]{6}$/', message: 'Le format de couleur doit être hexadécimal (#RRGGBB)')]
     #[Groups(['category:read', 'category:list'])]
     private ?string $color = null;
 
-    /**
-     * Catégorie parente (null si catégorie de niveau 1)
-     */
-    #[ORM\ManyToOne(targetEntity: self::class, inversedBy: 'children')]
-    #[ORM\JoinColumn(nullable: true, onDelete: 'CASCADE')]
+    #[ORM\Column(type: Types::BOOLEAN)]
     #[Groups(['category:read'])]
+    private bool $isActive = true;
+
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Assert\PositiveOrZero]
+    #[Groups(['category:read'])]
+    private int $position = 0;
+
+    #[ORM\Column(type: Types::BOOLEAN)]
+    private bool $isFeatured = false;
+
+    // ============================================
+    // HIÉRARCHIE (Auto-référence)
+    // ============================================
+
+    #[ORM\ManyToOne(targetEntity: self::class, inversedBy: 'children')]
+    #[ORM\JoinColumn(name: 'parent_id', referencedColumnName: 'id', onDelete: 'CASCADE')]
+    #[Groups(['category:detail'])]
     private ?self $parent = null;
 
-    /**
-     * Sous-catégories (enfants)
-     */
-    #[ORM\OneToMany(mappedBy: 'parent', targetEntity: self::class, cascade: ['persist', 'remove'])]
+    #[ORM\OneToMany(mappedBy: 'parent', targetEntity: self::class, cascade: ['persist', 'remove'], orphanRemoval: true)]
     #[ORM\OrderBy(['position' => 'ASC', 'name' => 'ASC'])]
-    #[Groups(['category:read', 'category:tree'])]
+    #[Groups(['category:detail'])]
     private Collection $children;
 
-    /**
-     * Niveau de profondeur dans l'arborescence (0 = racine)
-     */
-    #[ORM\Column(type: 'integer', options: ['default' => 0])]
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Assert\PositiveOrZero]
     #[Groups(['category:read'])]
     private int $level = 0;
 
-    /**
-     * Position/ordre d'affichage
-     */
-    #[ORM\Column(type: 'integer', options: ['default' => 0])]
-    #[Groups(['category:read', 'category:list'])]
-    private int $position = 0;
+    // ============================================
+    // RELATIONS AVEC LES AUTRES ENTITÉS
+    // ============================================
 
     /**
-     * Indique si la catégorie est active
+     * ✅ NOUVEAU - Sous-catégories détaillées avec tarification
      */
-    #[ORM\Column(type: 'boolean', options: ['default' => true])]
-    #[Groups(['category:read', 'category:list'])]
-    private bool $isActive = true;
+    #[ORM\OneToMany(mappedBy: 'category', targetEntity: ServiceSubcategory::class, cascade: ['persist', 'remove'], orphanRemoval: true)]
+    #[ORM\OrderBy(['displayOrder' => 'ASC', 'name' => 'ASC'])]
+    private Collection $subcategories;
 
     /**
-     * Indique si la catégorie est visible dans le menu
+     * ⚠️ DEPRECATED - Remplacé par ServiceSubcategory
+     * Conservé pour compatibilité avec l'ancien système
      */
-    #[ORM\Column(type: 'boolean', options: ['default' => true])]
-    #[Groups(['category:read'])]
-    private bool $isVisibleInMenu = true;
+    #[ORM\OneToMany(mappedBy: 'category', targetEntity: ServiceType::class)]
+    private Collection $serviceTypes;
 
-    /**
-     * Indique si c'est une catégorie populaire (mise en avant)
-     */
-    #[ORM\Column(type: 'boolean', options: ['default' => false])]
-    #[Groups(['category:read', 'category:list'])]
-    private bool $isPopular = false;
-
-    /**
-     * Tarif horaire minimum suggéré
-     */
-    #[ORM\Column(type: 'decimal', precision: 10, scale: 2, nullable: true)]
-    #[Assert\Positive(message: 'Le tarif doit être positif')]
-    #[Groups(['category:read'])]
-    private ?string $minHourlyRate = null;
-
-    /**
-     * Tarif horaire maximum suggéré
-     */
-    #[ORM\Column(type: 'decimal', precision: 10, scale: 2, nullable: true)]
-    #[Assert\Positive(message: 'Le tarif doit être positif')]
-    #[Groups(['category:read'])]
-    private ?string $maxHourlyRate = null;
-
-    /**
-     * Durée minimale en minutes pour cette catégorie
-     */
-    #[ORM\Column(type: 'integer', nullable: true)]
-    #[Assert\Positive(message: 'La durée doit être positive')]
-    #[Groups(['category:read'])]
-    private ?int $minDuration = null;
-
-    /**
-     * Durée standard en minutes pour cette catégorie
-     */
-    #[ORM\Column(type: 'integer', nullable: true)]
-    #[Assert\Positive(message: 'La durée doit être positive')]
-    #[Groups(['category:read'])]
-    private ?int $defaultDuration = null;
-
-    /**
-     * Métadonnées SEO - Title
-     */
-    #[ORM\Column(type: 'string', length: 255, nullable: true)]
-    private ?string $metaTitle = null;
-
-    /**
-     * Métadonnées SEO - Description
-     */
-    #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $metaDescription = null;
-
-    /**
-     * Métadonnées SEO - Keywords
-     */
-    #[ORM\Column(type: 'json', nullable: true)]
-    private ?array $metaKeywords = [];
-
-    /**
-     * Demandes de service associées
-     */
     #[ORM\OneToMany(mappedBy: 'category', targetEntity: ServiceRequest::class)]
     private Collection $serviceRequests;
 
     /**
-     * Nombre de demandes de service
+     * ⚠️ DEPRECATED - Les prestataires sont maintenant liés via ServiceSubcategory
+     * Relation conservée temporairement pour la migration
      */
-    #[ORM\Column(type: 'integer', options: ['default' => 0])]
-    #[Groups(['category:read', 'category:list'])]
+    #[ORM\ManyToMany(targetEntity: Prestataire::class, mappedBy: 'serviceCategories')]
+    private Collection $prestataires;
+
+    /**
+     * Règles de commission spécifiques à cette catégorie
+     */
+    #[ORM\OneToMany(mappedBy: 'serviceCategory', targetEntity: CommissionRule::class)]
+    private Collection $commissionRules;
+
+    // ============================================
+    // STATISTIQUES ET MÉTRIQUES
+    // ============================================
+
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Assert\PositiveOrZero]
     private int $requestCount = 0;
 
-    /**
-     * Date de création
-     */
-    #[ORM\Column(type: 'datetime')]
-    #[Groups(['category:read'])]
-    private ?\DateTimeInterface $createdAt = null;
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Assert\PositiveOrZero]
+    private int $prestataireCount = 0;
 
-    /**
-     * Date de dernière modification
-     */
-    #[ORM\Column(type: 'datetime')]
-    #[Groups(['category:read'])]
-    private ?\DateTimeInterface $updatedAt = null;
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Assert\PositiveOrZero]
+    private int $viewCount = 0;
+
+    #[ORM\Column(type: Types::DECIMAL, precision: 3, scale: 2, nullable: true)]
+    #[Assert\Range(min: 0, max: 5)]
+    private ?string $averageRating = null;
+
+    // ============================================
+    // INFORMATIONS COMPLÉMENTAIRES
+    // ============================================
+
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    private ?array $metadata = null;
+
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
+    private ?string $seoTitle = null;
+
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
+    private ?string $seoDescription = null;
+
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    private ?array $seoKeywords = null;
+
+    // ============================================
+    // DATES
+    // ============================================
+
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
+    #[Groups(['category:detail'])]
+    private \DateTimeImmutable $createdAt;
+
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    #[Groups(['category:detail'])]
+    private ?\DateTimeImmutable $updatedAt = null;
+
+    // ============================================
+    // CONSTRUCTEUR
+    // ============================================
 
     public function __construct()
     {
         $this->children = new ArrayCollection();
+        $this->subcategories = new ArrayCollection();
+        $this->serviceTypes = new ArrayCollection();
         $this->serviceRequests = new ArrayCollection();
-        $this->createdAt = new \DateTime();
-        $this->updatedAt = new \DateTime();
+        $this->prestataires = new ArrayCollection();
+        $this->commissionRules = new ArrayCollection();
+        $this->createdAt = new \DateTimeImmutable();
     }
 
-    #[ORM\PreUpdate]
-    public function setUpdatedAtValue(): void
-    {
-        $this->updatedAt = new \DateTime();
-    }
-
-    #[ORM\PrePersist]
-    #[ORM\PreUpdate]
-    public function updateLevel(): void
-    {
-        if ($this->parent) {
-            $this->level = $this->parent->getLevel() + 1;
-        } else {
-            $this->level = 0;
-        }
-    }
-
-    #[ORM\PrePersist]
-    public function generateSlug(): void
-    {
-        if (!$this->slug && $this->name) {
-            $this->slug = $this->slugify($this->name);
-        }
-    }
-
-    // Getters et Setters
+    // ============================================
+    // GETTERS & SETTERS
+    // ============================================
 
     public function getId(): ?int
     {
@@ -267,12 +232,6 @@ class ServiceCategory
     public function setName(?string $name): self
     {
         $this->name = $name;
-        
-        // Régénérer le slug si le nom change
-        if ($name) {
-            $this->slug = $this->slugify($name);
-        }
-        
         return $this;
     }
 
@@ -331,6 +290,43 @@ class ServiceCategory
         return $this;
     }
 
+    public function isActive(): bool
+    {
+        return $this->isActive;
+    }
+
+    public function setIsActive(bool $isActive): self
+    {
+        $this->isActive = $isActive;
+        return $this;
+    }
+
+    public function getPosition(): int
+    {
+        return $this->position;
+    }
+
+    public function setPosition(int $position): self
+    {
+        $this->position = $position;
+        return $this;
+    }
+
+    public function isFeatured(): bool
+    {
+        return $this->isFeatured;
+    }
+
+    public function setIsFeatured(bool $isFeatured): self
+    {
+        $this->isFeatured = $isFeatured;
+        return $this;
+    }
+
+    // ============================================
+    // HIÉRARCHIE - PARENT/CHILDREN
+    // ============================================
+
     public function getParent(): ?self
     {
         return $this->parent;
@@ -383,126 +379,147 @@ class ServiceCategory
         return $this;
     }
 
-    public function getPosition(): int
+    /**
+     * Met à jour automatiquement le niveau basé sur la hiérarchie
+     */
+    private function updateLevel(): void
     {
-        return $this->position;
+        $this->level = $this->calculateLevel();
+        
+        // Mettre à jour récursivement les niveaux des enfants
+        foreach ($this->children as $child) {
+            $child->updateLevel();
+        }
     }
 
-    public function setPosition(int $position): self
+    /**
+     * Calcule le niveau dans la hiérarchie
+     */
+    private function calculateLevel(): int
     {
-        $this->position = $position;
+        $level = 0;
+        $current = $this;
+        
+        while ($current->getParent() !== null) {
+            $level++;
+            $current = $current->getParent();
+        }
+        
+        return $level;
+    }
+
+    // ============================================
+    // RELATIONS - SUBCATEGORIES
+    // ============================================
+
+    /**
+     * @return Collection<int, ServiceSubcategory>
+     */
+    public function getSubcategories(): Collection
+    {
+        return $this->subcategories;
+    }
+
+    public function addSubcategory(ServiceSubcategory $subcategory): self
+    {
+        if (!$this->subcategories->contains($subcategory)) {
+            $this->subcategories->add($subcategory);
+            $subcategory->setCategory($this);
+        }
+
         return $this;
     }
 
-    public function isActive(): bool
+    public function removeSubcategory(ServiceSubcategory $subcategory): self
     {
-        return $this->isActive;
-    }
+        if ($this->subcategories->removeElement($subcategory)) {
+            if ($subcategory->getCategory() === $this) {
+                $subcategory->setCategory(null);
+            }
+        }
 
-    public function setIsActive(bool $isActive): self
-    {
-        $this->isActive = $isActive;
         return $this;
     }
 
-    public function isVisibleInMenu(): bool
+    /**
+     * Obtient toutes les sous-catégories (y compris celles des enfants)
+     */
+    public function getAllSubcategories(): Collection
     {
-        return $this->isVisibleInMenu;
+        $allSubcategories = new ArrayCollection();
+        
+        // Sous-catégories directes
+        foreach ($this->subcategories as $subcategory) {
+            if (!$allSubcategories->contains($subcategory)) {
+                $allSubcategories->add($subcategory);
+            }
+        }
+        
+        // Sous-catégories des enfants (récursif)
+        foreach ($this->children as $child) {
+            foreach ($child->getAllSubcategories() as $subcategory) {
+                if (!$allSubcategories->contains($subcategory)) {
+                    $allSubcategories->add($subcategory);
+                }
+            }
+        }
+        
+        return $allSubcategories;
     }
 
-    public function setIsVisibleInMenu(bool $isVisibleInMenu): self
+    /**
+     * Obtient les sous-catégories actives uniquement
+     */
+    public function getActiveSubcategories(): Collection
     {
-        $this->isVisibleInMenu = $isVisibleInMenu;
+        return $this->subcategories->filter(function (ServiceSubcategory $subcategory) {
+            return $subcategory->isActive();
+        });
+    }
+
+    // ============================================
+    // RELATIONS - SERVICE TYPES (DEPRECATED)
+    // ============================================
+
+    /**
+     * @return Collection<int, ServiceType>
+     * @deprecated Utiliser getSubcategories() à la place
+     */
+    public function getServiceTypes(): Collection
+    {
+        return $this->serviceTypes;
+    }
+
+    /**
+     * @deprecated
+     */
+    public function addServiceType(ServiceType $serviceType): self
+    {
+        if (!$this->serviceTypes->contains($serviceType)) {
+            $this->serviceTypes->add($serviceType);
+            $serviceType->setCategory($this);
+        }
+
         return $this;
     }
 
-    public function isPopular(): bool
+    /**
+     * @deprecated
+     */
+    public function removeServiceType(ServiceType $serviceType): self
     {
-        return $this->isPopular;
-    }
+        if ($this->serviceTypes->removeElement($serviceType)) {
+            if ($serviceType->getCategory() === $this) {
+                $serviceType->setCategory(null);
+            }
+        }
 
-    public function setIsPopular(bool $isPopular): self
-    {
-        $this->isPopular = $isPopular;
         return $this;
     }
 
-    public function getMinHourlyRate(): ?string
-    {
-        return $this->minHourlyRate;
-    }
-
-    public function setMinHourlyRate(?string $minHourlyRate): self
-    {
-        $this->minHourlyRate = $minHourlyRate;
-        return $this;
-    }
-
-    public function getMaxHourlyRate(): ?string
-    {
-        return $this->maxHourlyRate;
-    }
-
-    public function setMaxHourlyRate(?string $maxHourlyRate): self
-    {
-        $this->maxHourlyRate = $maxHourlyRate;
-        return $this;
-    }
-
-    public function getMinDuration(): ?int
-    {
-        return $this->minDuration;
-    }
-
-    public function setMinDuration(?int $minDuration): self
-    {
-        $this->minDuration = $minDuration;
-        return $this;
-    }
-
-    public function getDefaultDuration(): ?int
-    {
-        return $this->defaultDuration;
-    }
-
-    public function setDefaultDuration(?int $defaultDuration): self
-    {
-        $this->defaultDuration = $defaultDuration;
-        return $this;
-    }
-
-    public function getMetaTitle(): ?string
-    {
-        return $this->metaTitle;
-    }
-
-    public function setMetaTitle(?string $metaTitle): self
-    {
-        $this->metaTitle = $metaTitle;
-        return $this;
-    }
-
-    public function getMetaDescription(): ?string
-    {
-        return $this->metaDescription;
-    }
-
-    public function setMetaDescription(?string $metaDescription): self
-    {
-        $this->metaDescription = $metaDescription;
-        return $this;
-    }
-
-    public function getMetaKeywords(): ?array
-    {
-        return $this->metaKeywords ?? [];
-    }
-
-    public function setMetaKeywords(?array $metaKeywords): self
-    {
-        $this->metaKeywords = $metaKeywords;
-        return $this;
-    }
+    // ============================================
+    // RELATIONS - SERVICE REQUESTS
+    // ============================================
 
     /**
      * @return Collection<int, ServiceRequest>
@@ -511,6 +528,98 @@ class ServiceCategory
     {
         return $this->serviceRequests;
     }
+
+    public function addServiceRequest(ServiceRequest $serviceRequest): self
+    {
+        if (!$this->serviceRequests->contains($serviceRequest)) {
+            $this->serviceRequests->add($serviceRequest);
+            $serviceRequest->setCategory($this);
+        }
+
+        return $this;
+    }
+
+    public function removeServiceRequest(ServiceRequest $serviceRequest): self
+    {
+        if ($this->serviceRequests->removeElement($serviceRequest)) {
+            if ($serviceRequest->getCategory() === $this) {
+                $serviceRequest->setCategory(null);
+            }
+        }
+
+        return $this;
+    }
+
+    // ============================================
+    // RELATIONS - PRESTATAIRES (DEPRECATED)
+    // ============================================
+
+    /**
+     * @return Collection<int, Prestataire>
+     * @deprecated Les prestataires sont maintenant liés via ServiceSubcategory->specializations
+     */
+    public function getPrestataires(): Collection
+    {
+        return $this->prestataires;
+    }
+
+    /**
+     * @deprecated
+     */
+    public function addPrestataire(Prestataire $prestataire): self
+    {
+        if (!$this->prestataires->contains($prestataire)) {
+            $this->prestataires->add($prestataire);
+        }
+
+        return $this;
+    }
+
+    /**
+     * @deprecated
+     */
+    public function removePrestataire(Prestataire $prestataire): self
+    {
+        $this->prestataires->removeElement($prestataire);
+        return $this;
+    }
+
+    // ============================================
+    // RELATIONS - COMMISSION RULES
+    // ============================================
+
+    /**
+     * @return Collection<int, CommissionRule>
+     */
+    public function getCommissionRules(): Collection
+    {
+        return $this->commissionRules;
+    }
+
+    public function addCommissionRule(CommissionRule $commissionRule): self
+    {
+        if (!$this->commissionRules->contains($commissionRule)) {
+            $this->commissionRules->add($commissionRule);
+            $commissionRule->setServiceCategory($this);
+        }
+
+        return $this;
+    }
+
+    public function removeCommissionRule(CommissionRule $commissionRule): self
+    {
+        if ($this->commissionRules->removeElement($commissionRule)) {
+            if ($commissionRule->getServiceCategory() === $this) {
+                $commissionRule->setServiceCategory(null);
+            }
+        }
+
+        return $this;
+    }
+
+    // ============================================
+    // STATISTIQUES
+    // ============================================
 
     public function getRequestCount(): int
     {
@@ -529,169 +638,312 @@ class ServiceCategory
         return $this;
     }
 
-    public function getCreatedAt(): ?\DateTimeInterface
+    public function getPrestataireCount(): int
+    {
+        return $this->prestataireCount;
+    }
+
+    public function setPrestataireCount(int $prestataireCount): self
+    {
+        $this->prestataireCount = $prestataireCount;
+        return $this;
+    }
+
+    public function getViewCount(): int
+    {
+        return $this->viewCount;
+    }
+
+    public function setViewCount(int $viewCount): self
+    {
+        $this->viewCount = $viewCount;
+        return $this;
+    }
+
+    public function incrementViewCount(): self
+    {
+        $this->viewCount++;
+        return $this;
+    }
+
+    public function getAverageRating(): ?string
+    {
+        return $this->averageRating;
+    }
+
+    public function setAverageRating(?string $averageRating): self
+    {
+        $this->averageRating = $averageRating;
+        return $this;
+    }
+
+    // ============================================
+    // MÉTADONNÉES ET SEO
+    // ============================================
+
+    public function getMetadata(): ?array
+    {
+        return $this->metadata ?? [];
+    }
+
+    public function setMetadata(?array $metadata): self
+    {
+        $this->metadata = $metadata;
+        return $this;
+    }
+
+    public function addMetadata(string $key, mixed $value): self
+    {
+        $metadata = $this->getMetadata();
+        $metadata[$key] = $value;
+        $this->metadata = $metadata;
+        return $this;
+    }
+
+    public function getSeoTitle(): ?string
+    {
+        return $this->seoTitle;
+    }
+
+    public function setSeoTitle(?string $seoTitle): self
+    {
+        $this->seoTitle = $seoTitle;
+        return $this;
+    }
+
+    public function getSeoDescription(): ?string
+    {
+        return $this->seoDescription;
+    }
+
+    public function setSeoDescription(?string $seoDescription): self
+    {
+        $this->seoDescription = $seoDescription;
+        return $this;
+    }
+
+    public function getSeoKeywords(): ?array
+    {
+        return $this->seoKeywords ?? [];
+    }
+
+    public function setSeoKeywords(?array $seoKeywords): self
+    {
+        $this->seoKeywords = $seoKeywords;
+        return $this;
+    }
+
+    // ============================================
+    // DATES
+    // ============================================
+
+    public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
     }
 
-    public function setCreatedAt(?\DateTimeInterface $createdAt): self
+    public function setCreatedAt(\DateTimeImmutable $createdAt): self
     {
         $this->createdAt = $createdAt;
         return $this;
     }
 
-    public function getUpdatedAt(): ?\DateTimeInterface
+    public function getUpdatedAt(): ?\DateTimeImmutable
     {
         return $this->updatedAt;
     }
 
-    public function setUpdatedAt(?\DateTimeInterface $updatedAt): self
+    public function setUpdatedAt(?\DateTimeImmutable $updatedAt): self
     {
         $this->updatedAt = $updatedAt;
         return $this;
     }
 
-    // Méthodes utilitaires
+    // ============================================
+    // MÉTHODES UTILITAIRES
+    // ============================================
 
     /**
-     * Vérifie si c'est une catégorie racine (niveau 0)
+     * Vérifie si c'est une catégorie racine (sans parent)
      */
-    #[Groups(['category:read'])]
-    public function isRoot(): bool
+    public function isRootCategory(): bool
     {
-        return $this->parent === null && $this->level === 0;
-    }
-
-    /**
-     * Vérifie si c'est une feuille (pas d'enfants)
-     */
-    #[Groups(['category:read'])]
-    public function isLeaf(): bool
-    {
-        return $this->children->isEmpty();
+        return $this->parent === null;
     }
 
     /**
      * Vérifie si la catégorie a des enfants
      */
-    #[Groups(['category:read'])]
     public function hasChildren(): bool
     {
-        return !$this->children->isEmpty();
+        return $this->children->count() > 0;
     }
 
     /**
-     * Obtient tous les enfants actifs
+     * Vérifie si la catégorie a des sous-catégories
      */
-    public function getActiveChildren(): Collection
+    public function hasSubcategories(): bool
     {
-        return $this->children->filter(fn(self $child) => $child->isActive());
+        return $this->subcategories->count() > 0;
     }
 
     /**
-     * Obtient le chemin complet (breadcrumb)
-     * Ex: "Ménage > Ménage courant"
+     * Obtient le chemin complet de la catégorie (breadcrumb)
+     * Retourne un tableau de catégories du plus haut niveau au niveau actuel
      */
-    #[Groups(['category:read'])]
-    public function getPath(string $separator = ' > '): string
+    public function getPath(): array
     {
-        $path = [$this->name];
-        $current = $this->parent;
+        $path = [$this];
+        $current = $this;
 
-        while ($current !== null) {
-            array_unshift($path, $current->getName());
-            $current = $current->getParent();
+        while ($current->getParent() !== null) {
+            $parent = $current->getParent();
+            array_unshift($path, $parent);
+            $current = $parent;
         }
 
-        return implode($separator, $path);
+        return $path;
     }
 
     /**
-     * Obtient tous les ancêtres (du plus proche au plus éloigné)
+     * Obtient le chemin formaté en string (ex: "Nettoyage > Grand ménage > Après travaux")
      */
-    public function getAncestors(): array
+    public function getPathString(string $separator = ' > '): string
     {
-        $ancestors = [];
-        $current = $this->parent;
-
-        while ($current !== null) {
-            $ancestors[] = $current;
-            $current = $current->getParent();
-        }
-
-        return $ancestors;
-    }
-
-    /**
-     * Obtient tous les descendants (récursif)
-     */
-    public function getDescendants(): array
-    {
-        $descendants = [];
-
-        foreach ($this->children as $child) {
-            $descendants[] = $child;
-            $descendants = array_merge($descendants, $child->getDescendants());
-        }
-
-        return $descendants;
+        $path = $this->getPath();
+        $names = array_map(fn(self $category) => $category->getName(), $path);
+        return implode($separator, $names);
     }
 
     /**
      * Obtient la catégorie racine
      */
-    public function getRoot(): self
+    public function getRootCategory(): self
     {
         $current = $this;
-
+        
         while ($current->getParent() !== null) {
             $current = $current->getParent();
         }
-
+        
         return $current;
     }
 
     /**
-     * Génère un slug à partir d'un texte
+     * Obtient tous les descendants (enfants, petits-enfants, etc.)
      */
-    private function slugify(string $text): string
+    public function getAllDescendants(): array
     {
-        // Remplacer les caractères non-ASCII
-        $text = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text);
+        $descendants = [];
         
-        // Convertir en minuscules
-        $text = strtolower($text);
+        foreach ($this->children as $child) {
+            $descendants[] = $child;
+            $descendants = array_merge($descendants, $child->getAllDescendants());
+        }
         
-        // Remplacer les caractères spéciaux par des tirets
-        $text = preg_replace('/[^a-z0-9]+/', '-', $text);
-        
-        // Supprimer les tirets en début et fin
-        $text = trim($text, '-');
-        
-        return $text;
+        return $descendants;
     }
 
     /**
-     * Retourne un tableau pour l'arborescence
+     * Vérifie si une catégorie est un ancêtre de cette catégorie
      */
-    public function toTree(): array
+    public function isDescendantOf(self $category): bool
     {
-        return [
-            'id' => $this->id,
-            'name' => $this->name,
-            'slug' => $this->slug,
-            'icon' => $this->icon,
-            'color' => $this->color,
-            'level' => $this->level,
-            'isActive' => $this->isActive,
-            'isPopular' => $this->isPopular,
-            'requestCount' => $this->requestCount,
-            'children' => array_map(fn(self $child) => $child->toTree(), $this->children->toArray()),
-        ];
+        $current = $this->parent;
+        
+        while ($current !== null) {
+            if ($current->getId() === $category->getId()) {
+                return true;
+            }
+            $current = $current->getParent();
+        }
+        
+        return false;
     }
 
     /**
-     * Retourne un tableau simple
+     * Obtient la profondeur maximale de l'arborescence à partir de cette catégorie
+     */
+    public function getMaxDepth(): int
+    {
+        if (!$this->hasChildren()) {
+            return 0;
+        }
+
+        $maxChildDepth = 0;
+        foreach ($this->children as $child) {
+            $childDepth = $child->getMaxDepth();
+            if ($childDepth > $maxChildDepth) {
+                $maxChildDepth = $childDepth;
+            }
+        }
+
+        return $maxChildDepth + 1;
+    }
+
+    /**
+     * Compte le nombre total de demandes de service (incluant les enfants)
+     */
+    public function getTotalRequestCount(): int
+    {
+        $total = $this->requestCount;
+        
+        foreach ($this->children as $child) {
+            $total += $child->getTotalRequestCount();
+        }
+        
+        return $total;
+    }
+
+    /**
+     * Vérifie si la catégorie est visible (active et avec parent actif si existe)
+     */
+    public function isVisible(): bool
+    {
+        if (!$this->isActive) {
+            return false;
+        }
+
+        $current = $this->parent;
+        while ($current !== null) {
+            if (!$current->isActive()) {
+                return false;
+            }
+            $current = $current->getParent();
+        }
+
+        return true;
+    }
+
+    // ============================================
+    // LIFECYCLE CALLBACKS
+    // ============================================
+
+    #[ORM\PrePersist]
+    public function onPrePersist(): void
+    {
+        $this->createdAt = new \DateTimeImmutable();
+        $this->updateLevel();
+    }
+
+    #[ORM\PreUpdate]
+    public function onPreUpdate(): void
+    {
+        $this->updatedAt = new \DateTimeImmutable();
+        $this->updateLevel();
+    }
+
+    // ============================================
+    // MÉTHODES SPÉCIALES
+    // ============================================
+
+    public function __toString(): string
+    {
+        return $this->name ?? '';
+    }
+
+    /**
+     * Retourne une représentation JSON-friendly de la catégorie
      */
     public function toArray(): array
     {
@@ -701,26 +953,19 @@ class ServiceCategory
             'slug' => $this->slug,
             'description' => $this->description,
             'icon' => $this->icon,
+            'image' => $this->image,
             'color' => $this->color,
             'level' => $this->level,
             'position' => $this->position,
             'isActive' => $this->isActive,
-            'isPopular' => $this->isPopular,
-            'isRoot' => $this->isRoot(),
-            'isLeaf' => $this->isLeaf(),
-            'hasChildren' => $this->hasChildren(),
-            'childrenCount' => $this->children->count(),
-            'requestCount' => $this->requestCount,
-            'path' => $this->getPath(),
+            'isFeatured' => $this->isFeatured,
             'parentId' => $this->parent?->getId(),
+            'childrenCount' => $this->children->count(),
+            'subcategoriesCount' => $this->subcategories->count(),
+            'requestCount' => $this->requestCount,
+            'prestataireCount' => $this->prestataireCount,
+            'viewCount' => $this->viewCount,
+            'averageRating' => $this->averageRating,
         ];
-    }
-
-    /**
-     * Représentation textuelle
-     */
-    public function __toString(): string
-    {
-        return $this->getPath();
     }
 }

@@ -1,177 +1,452 @@
 <?php
-// src/Entity/Booking/Booking.php
 
 namespace App\Entity\Booking;
 
-use App\Repository\BookingRepository;
-use Doctrine\Common\Collections\ArrayCollection;
-use Doctrine\Common\Collections\Collection;
-use Doctrine\ORM\Mapping as ORM;
-use App\Entity\Client\Client;
-use App\Entity\Prestataire\Prestataire;
+use App\Entity\User\Client;
+use App\Entity\User\Prestataire;
+use App\Entity\User\User;
 use App\Entity\ServiceRequest\ServiceRequest;
 use App\Entity\Quote\Quote;
-use App\Entity\User\User;
+use App\Entity\Service\ServiceCategory;
 use App\Entity\Payment\Payment;
 use App\Entity\Review\Review;
-use App\Entity\Booking\Recurrence;
-use App\Entity\Booking\Replacement;
+use App\Entity\Planning\Replacement;
+use App\Entity\Planning\AvailableSlot;
+use App\Repository\Booking\BookingRepository;
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
+use Doctrine\DBAL\Types\Types;
+use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Serializer\Annotation\Groups;
 use Symfony\Component\Validator\Constraints as Assert;
 
+/**
+ * Représente une réservation confirmée de service
+ * Créée automatiquement lors de l'acceptation d'un devis par le client
+ * Contient toutes les informations pour l'exécution du service
+ */
 #[ORM\Entity(repositoryClass: BookingRepository::class)]
 #[ORM\Table(name: 'bookings')]
+#[ORM\Index(columns: ['client_id', 'status'], name: 'idx_client_status')]
+#[ORM\Index(columns: ['prestataire_id', 'status'], name: 'idx_prestataire_status')]
+#[ORM\Index(columns: ['scheduled_date', 'status'], name: 'idx_date_status')]
+#[ORM\Index(columns: ['status'], name: 'idx_status')]
+#[ORM\Index(columns: ['reference_number'], name: 'idx_reference')]
+#[ORM\Index(columns: ['created_at'], name: 'idx_created')]
 #[ORM\HasLifecycleCallbacks]
 class Booking
 {
+    // Statuts possibles
+    public const STATUS_PENDING = 'pending';                     // En attente de confirmation
+    public const STATUS_AWAITING_PAYMENT = 'awaiting_payment';   // En attente de paiement
+    public const STATUS_SCHEDULED = 'scheduled';                 // Planifié
+    public const STATUS_CONFIRMED = 'confirmed';                 // Confirmé par les deux parties
+    public const STATUS_IN_PROGRESS = 'in_progress';             // En cours d'exécution
+    public const STATUS_COMPLETED = 'completed';                 // Terminé avec succès
+    public const STATUS_CANCELLED = 'cancelled';                 // Annulé
+    public const STATUS_NO_SHOW = 'no_show';                    // Client absent
+    public const STATUS_DISPUTED = 'disputed';                   // Litige en cours
+    public const STATUS_REFUNDED = 'refunded';                   // Remboursée
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
-    #[ORM\Column(type: 'integer')]
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Groups(['booking:read', 'booking:list', 'client:read', 'prestataire:read'])]
     private ?int $id = null;
 
+    /**
+     * Numéro de référence unique pour la réservation
+     * Format: BK-YYYYMMDD-XXXXX
+     */
+    #[ORM\Column(type: Types::STRING, length: 100, unique: true)]
+    #[Groups(['booking:read', 'booking:list'])]
+    private ?string $referenceNumber = null;
+
+    /**
+     * Devis à l'origine de la réservation
+     */
     #[ORM\OneToOne(inversedBy: 'booking', targetEntity: Quote::class)]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    #[Groups(['booking:read', 'booking:detail'])]
     private ?Quote $quote = null;
 
+    /**
+     * Demande de service d'origine (peut être null si réservation directe)
+     */
     #[ORM\ManyToOne(targetEntity: ServiceRequest::class, inversedBy: 'bookings')]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    #[Groups(['booking:read', 'booking:detail'])]
     private ?ServiceRequest $serviceRequest = null;
 
+    /**
+     * Client qui a réservé le service
+     */
     #[ORM\ManyToOne(targetEntity: Client::class, inversedBy: 'bookings')]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
+    #[Assert\NotNull(message: 'Le client est obligatoire', groups: ['booking:create'])]
+    #[Groups(['booking:read', 'booking:list', 'prestataire:read'])]
     private ?Client $client = null;
 
+    /**
+     * Prestataire qui effectuera le service
+     */
     #[ORM\ManyToOne(targetEntity: Prestataire::class, inversedBy: 'bookings')]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
+    #[Assert\NotNull(message: 'Le prestataire est obligatoire', groups: ['booking:create'])]
+    #[Groups(['booking:read', 'booking:list', 'client:read'])]
     private ?Prestataire $prestataire = null;
 
-    #[ORM\Column(type: 'date')]
-    #[Assert\NotBlank]
-    private ?\DateTimeInterface $scheduledDate = null;
+    /**
+     * Catégorie de service
+     */
+    #[ORM\ManyToOne(targetEntity: ServiceCategory::class)]
+    #[ORM\JoinColumn(nullable: true)]
+    #[Groups(['booking:read', 'booking:list'])]
+    private ?ServiceCategory $serviceCategory = null;
 
-    #[ORM\Column(type: 'time')]
-    #[Assert\NotBlank]
-    private ?\DateTimeInterface $scheduledTime = null;
-
-    #[ORM\Column(type: 'integer')]
-    #[Assert\Positive]
-    private ?int $duration = null; // en minutes
-
-    #[ORM\Column(type: 'string', length: 255)]
-    #[Assert\NotBlank]
-    private ?string $address = null;
-
-    #[ORM\Column(type: 'string', length: 100)]
-    private ?string $city = null;
-
-    #[ORM\Column(type: 'string', length: 10)]
-    private ?string $postalCode = null;
-
-    #[ORM\Column(type: 'decimal', precision: 10, scale: 7, nullable: true)]
-    private ?string $latitude = null;
-
-    #[ORM\Column(type: 'decimal', precision: 10, scale: 7, nullable: true)]
-    private ?string $longitude = null;
-
-    #[ORM\Column(type: 'decimal', precision: 10, scale: 2)]
-    #[Assert\Positive]
-    private ?string $amount = null;
-
-    #[ORM\Column(type: 'string', length: 50)]
-    private string $status = 'scheduled'; // scheduled, confirmed, in_progress, completed, cancelled
-
+    /**
+     * Récurrence associée si service récurrent
+     */
     #[ORM\ManyToOne(targetEntity: Recurrence::class, inversedBy: 'bookings')]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    #[Groups(['booking:read', 'booking:detail'])]
     private ?Recurrence $recurrence = null;
 
-    #[ORM\Column(type: 'datetime', nullable: true)]
+    /**
+     * Créneau disponible utilisé pour cette réservation
+     */
+    #[ORM\OneToOne(targetEntity: AvailableSlot::class, mappedBy: 'booking')]
+    #[Groups(['booking:admin'])]
+    private ?AvailableSlot $availableSlot = null;
+
+    /**
+     * Date prévue du service
+     */
+    #[ORM\Column(type: Types::DATE_MUTABLE)]
+    #[Assert\NotBlank(message: 'La date est obligatoire', groups: ['booking:create'])]
+    #[Assert\GreaterThanOrEqual(
+        'today',
+        message: 'La date ne peut pas être dans le passé',
+        groups: ['booking:create']
+    )]
+    #[Groups(['booking:read', 'booking:list'])]
+    private ?\DateTimeInterface $scheduledDate = null;
+
+    /**
+     * Heure prévue du service
+     */
+    #[ORM\Column(type: Types::TIME_MUTABLE)]
+    #[Assert\NotBlank(message: 'L\'heure est obligatoire', groups: ['booking:create'])]
+    #[Groups(['booking:read', 'booking:list'])]
+    private ?\DateTimeInterface $scheduledTime = null;
+
+    /**
+     * Durée prévue en minutes
+     */
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Assert\NotBlank(groups: ['booking:create'])]
+    #[Assert\Positive(message: 'La durée doit être positive')]
+    #[Assert\Range(
+        min: 30,
+        max: 480,
+        notInRangeMessage: 'La durée doit être entre {{ min }} et {{ max }} minutes'
+    )]
+    #[Groups(['booking:read', 'booking:list'])]
+    private ?int $duration = null;
+
+    /**
+     * Adresse complète du service
+     */
+    #[ORM\Column(type: Types::STRING, length: 255)]
+    #[Assert\NotBlank(message: 'L\'adresse est obligatoire', groups: ['booking:create'])]
+    #[Assert\Length(
+        max: 255,
+        maxMessage: 'L\'adresse ne peut pas dépasser {{ limit }} caractères'
+    )]
+    #[Groups(['booking:read', 'booking:list'])]
+    private ?string $address = null;
+
+    /**
+     * Ville
+     */
+    #[ORM\Column(type: Types::STRING, length: 100)]
+    #[Assert\NotBlank(groups: ['booking:create'])]
+    #[Groups(['booking:read', 'booking:list'])]
+    private ?string $city = null;
+
+    /**
+     * Code postal
+     */
+    #[ORM\Column(type: Types::STRING, length: 10)]
+    #[Assert\NotBlank(groups: ['booking:create'])]
+    #[Assert\Length(max: 10)]
+    #[Groups(['booking:read', 'booking:list'])]
+    private ?string $postalCode = null;
+
+    /**
+     * Latitude pour géolocalisation
+     */
+    #[ORM\Column(type: Types::DECIMAL, precision: 10, scale: 7, nullable: true)]
+    #[Groups(['booking:read', 'booking:admin'])]
+    private ?string $latitude = null;
+
+    /**
+     * Longitude pour géolocalisation
+     */
+    #[ORM\Column(type: Types::DECIMAL, precision: 10, scale: 7, nullable: true)]
+    #[Groups(['booking:read', 'booking:admin'])]
+    private ?string $longitude = null;
+
+    /**
+     * Montant total de la réservation
+     */
+    #[ORM\Column(type: Types::DECIMAL, precision: 10, scale: 2)]
+    #[Assert\NotBlank(groups: ['booking:create'])]
+    #[Assert\Positive(message: 'Le montant doit être positif')]
+    #[Groups(['booking:read', 'booking:list'])]
+    private ?string $amount = null;
+
+    /**
+     * Statut actuel de la réservation
+     */
+    #[ORM\Column(type: Types::STRING, length: 50)]
+    #[Assert\Choice(
+        choices: [
+            self::STATUS_PENDING,
+            self::STATUS_AWAITING_PAYMENT,
+            self::STATUS_SCHEDULED,
+            self::STATUS_CONFIRMED,
+            self::STATUS_IN_PROGRESS,
+            self::STATUS_COMPLETED,
+            self::STATUS_CANCELLED,
+            self::STATUS_NO_SHOW,
+            self::STATUS_DISPUTED,
+            self::STATUS_REFUNDED
+        ],
+        message: 'Statut invalide'
+    )]
+    #[Groups(['booking:read', 'booking:list'])]
+    private string $status = self::STATUS_PENDING;
+
+    /**
+     * Heure de début réelle du service
+     */
+    #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
+    #[Groups(['booking:read', 'booking:detail'])]
     private ?\DateTime $actualStartTime = null;
 
-    #[ORM\Column(type: 'datetime', nullable: true)]
+    /**
+     * Heure de fin réelle du service
+     */
+    #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
+    #[Groups(['booking:read', 'booking:detail'])]
     private ?\DateTime $actualEndTime = null;
 
-    #[ORM\Column(type: 'text', nullable: true)]
+    /**
+     * Notes de finalisation du service (par le prestataire)
+     */
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
+    #[Assert\Length(
+        max: 2000,
+        maxMessage: 'Les notes ne peuvent pas dépasser {{ limit }} caractères'
+    )]
+    #[Groups(['booking:read', 'booking:detail'])]
     private ?string $completionNotes = null;
 
-    #[ORM\Column(type: 'text', nullable: true)]
+    /**
+     * Raison de l'annulation
+     */
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
+    #[Assert\Length(
+        max: 1000,
+        maxMessage: 'La raison ne peut pas dépasser {{ limit }} caractères'
+    )]
+    #[Groups(['booking:read', 'booking:detail'])]
     private ?string $cancellationReason = null;
 
-    #[ORM\Column(type: 'json', nullable: true)]
+    /**
+     * Instructions du client pour le prestataire
+     */
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    #[Groups(['booking:read', 'booking:detail', 'prestataire:read'])]
     private ?array $clientInstructions = [];
 
-    #[ORM\Column(type: 'json', nullable: true)]
+    /**
+     * Notes du prestataire (visibles uniquement par lui)
+     */
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    #[Groups(['booking:admin', 'prestataire:read'])]
     private ?array $prestataireNotes = [];
 
-    #[ORM\Column(type: 'boolean')]
+    /**
+     * Le client sera-t-il présent lors du service ?
+     */
+    #[ORM\Column(type: Types::BOOLEAN)]
+    #[Groups(['booking:read', 'booking:detail'])]
     private bool $clientPresent = false;
 
-    #[ORM\Column(type: 'string', length: 255, nullable: true)]
-    private ?string $accessInstructions = null; // Instructions d'accès (code porte, etc.)
+    /**
+     * Instructions d'accès au domicile (code porte, digicode, etc.)
+     */
+    #[ORM\Column(type: Types::STRING, length: 255, nullable: true)]
+    #[Assert\Length(
+        max: 255,
+        maxMessage: 'Les instructions ne peuvent pas dépasser {{ limit }} caractères'
+    )]
+    #[Groups(['booking:read', 'booking:detail', 'prestataire:read'])]
+    private ?string $accessInstructions = null;
 
-    #[ORM\Column(type: 'string', length: 20, nullable: true)]
+    /**
+     * Code d'accès (chiffré)
+     */
+    #[ORM\Column(type: Types::STRING, length: 20, nullable: true)]
+    #[Groups(['booking:detail', 'prestataire:read'])]
     private ?string $accessCode = null;
 
-    #[ORM\Column(type: 'datetime_immutable')]
-    private ?\DateTimeImmutable $createdAt = null;
-
-    #[ORM\Column(type: 'datetime_immutable')]
-    private ?\DateTimeImmutable $updatedAt = null;
-
-    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
-    private ?\DateTimeImmutable $confirmedAt = null;
-
-    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
-    private ?\DateTimeImmutable $completedAt = null;
-
-    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
-    private ?\DateTimeImmutable $cancelledAt = null;
-
-    #[ORM\ManyToOne(targetEntity: User::class)]
-    private ?User $cancelledBy = null;
-
-    #[ORM\OneToOne(mappedBy: 'booking', targetEntity: Payment::class, cascade: ['persist'])]
-    private ?Payment $payment = null;
-
-    #[ORM\OneToOne(mappedBy: 'booking', targetEntity: Review::class, cascade: ['persist'])]
-    private ?Review $review = null;
-
-    #[ORM\OneToMany(mappedBy: 'originalBooking', targetEntity: Replacement::class, cascade: ['persist'])]
-    private Collection $replacements;
-
-    #[ORM\Column(type: 'boolean')]
+    /**
+     * Rappel 24h envoyé
+     */
+    #[ORM\Column(type: Types::BOOLEAN)]
+    #[Groups(['booking:admin'])]
     private bool $reminderSent24h = false;
 
-    #[ORM\Column(type: 'boolean')]
+    /**
+     * Rappel 2h envoyé
+     */
+    #[ORM\Column(type: Types::BOOLEAN)]
+    #[Groups(['booking:admin'])]
     private bool $reminderSent2h = false;
 
-    #[ORM\Column(type: 'string', length: 100, nullable: true)]
-    private ?string $referenceNumber = null;
+    /**
+     * Paiement associé à la réservation
+     */
+    #[ORM\OneToOne(mappedBy: 'booking', targetEntity: Payment::class, cascade: ['persist', 'remove'])]
+    #[Groups(['booking:read', 'booking:detail'])]
+    private ?Payment $payment = null;
+
+    /**
+     * Avis laissé par le client
+     */
+    #[ORM\OneToOne(mappedBy: 'booking', targetEntity: Review::class, cascade: ['persist', 'remove'])]
+    #[Groups(['booking:read', 'booking:detail'])]
+    private ?Review $review = null;
+
+    /**
+     * Historique des remplacements de prestataire
+     */
+    #[ORM\OneToMany(mappedBy: 'originalBooking', targetEntity: Replacement::class, cascade: ['persist', 'remove'], orphanRemoval: true)]
+    #[Groups(['booking:detail', 'booking:admin'])]
+    private Collection $replacements;
+
+    /**
+     * Utilisateur qui a annulé la réservation (si annulée)
+     */
+    #[ORM\ManyToOne(targetEntity: User::class)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    #[Groups(['booking:admin'])]
+    private ?User $cancelledBy = null;
+
+    /**
+     * Date de création de la réservation
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
+    #[Groups(['booking:read', 'booking:list'])]
+    private \DateTimeImmutable $createdAt;
+
+    /**
+     * Date de dernière mise à jour
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
+    #[Groups(['booking:read'])]
+    private \DateTimeImmutable $updatedAt;
+
+    /**
+     * Date de confirmation de la réservation
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    #[Groups(['booking:read', 'booking:detail'])]
+    private ?\DateTimeImmutable $confirmedAt = null;
+
+    /**
+     * Date de finalisation du service
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    #[Groups(['booking:read', 'booking:detail'])]
+    private ?\DateTimeImmutable $completedAt = null;
+
+    /**
+     * Date d'annulation
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    #[Groups(['booking:read', 'booking:detail'])]
+    private ?\DateTimeImmutable $cancelledAt = null;
+
+    /**
+     * Date de remboursement
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    #[Groups(['booking:read', 'booking:detail'])]
+    private ?\DateTimeImmutable $refundedAt = null;
 
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
         $this->updatedAt = new \DateTimeImmutable();
         $this->replacements = new ArrayCollection();
+        $this->clientInstructions = [];
+        $this->prestataireNotes = [];
         $this->generateReferenceNumber();
     }
 
-    #[ORM\PreUpdate]
-    public function preUpdate(): void
-    {
-        $this->updatedAt = new \DateTimeImmutable();
-    }
+    // ==================== LIFECYCLE CALLBACKS ====================
 
     #[ORM\PrePersist]
-    public function prePersist(): void
+    public function onPrePersist(): void
     {
-        if (!$this->referenceNumber) {
+        if ($this->createdAt === null) {
+            $this->createdAt = new \DateTimeImmutable();
+        }
+        if ($this->updatedAt === null) {
+            $this->updatedAt = new \DateTimeImmutable();
+        }
+        if ($this->referenceNumber === null) {
             $this->generateReferenceNumber();
         }
     }
 
-    // Getters and Setters
+    #[ORM\PreUpdate]
+    public function onPreUpdate(): void
+    {
+        $this->updatedAt = new \DateTimeImmutable();
+    }
+
+    /**
+     * Génère un numéro de référence unique
+     * Format: BK-YYYYMMDD-XXXXX
+     */
+    private function generateReferenceNumber(): void
+    {
+        $date = (new \DateTime())->format('Ymd');
+        $random = strtoupper(substr(md5(uniqid((string)mt_rand(), true)), 0, 5));
+        $this->referenceNumber = "BK-{$date}-{$random}";
+    }
+
+    // ==================== GETTERS / SETTERS ====================
 
     public function getId(): ?int
     {
         return $this->id;
+    }
+
+    public function getReferenceNumber(): ?string
+    {
+        return $this->referenceNumber;
+    }
+
+    public function setReferenceNumber(?string $referenceNumber): self
+    {
+        $this->referenceNumber = $referenceNumber;
+        return $this;
     }
 
     public function getQuote(): ?Quote
@@ -218,6 +493,45 @@ class Booking
         return $this;
     }
 
+    public function getServiceCategory(): ?ServiceCategory
+    {
+        return $this->serviceCategory;
+    }
+
+    public function setServiceCategory(?ServiceCategory $serviceCategory): self
+    {
+        $this->serviceCategory = $serviceCategory;
+        return $this;
+    }
+
+    public function getRecurrence(): ?Recurrence
+    {
+        return $this->recurrence;
+    }
+
+    public function setRecurrence(?Recurrence $recurrence): self
+    {
+        $this->recurrence = $recurrence;
+        return $this;
+    }
+
+    public function getAvailableSlot(): ?AvailableSlot
+    {
+        return $this->availableSlot;
+    }
+
+    public function setAvailableSlot(?AvailableSlot $availableSlot): self
+    {
+        $this->availableSlot = $availableSlot;
+        
+        // Synchronisation bidirectionnelle
+        if ($availableSlot !== null && $availableSlot->getBooking() !== $this) {
+            $availableSlot->setBooking($this);
+        }
+        
+        return $this;
+    }
+
     public function getScheduledDate(): ?\DateTimeInterface
     {
         return $this->scheduledDate;
@@ -240,17 +554,23 @@ class Booking
         return $this;
     }
 
-    public function getScheduledDateTime(): \DateTime
+    /**
+     * Retourne la date et l'heure combinées
+     */
+    public function getScheduledDateTime(): ?\DateTime
     {
-        $date = clone $this->scheduledDate;
-        $time = $this->scheduledTime;
-        
-        return (new \DateTime($date->format('Y-m-d')))
-            ->setTime(
-                (int)$time->format('H'),
-                (int)$time->format('i'),
-                (int)$time->format('s')
-            );
+        if (!$this->scheduledDate || !$this->scheduledTime) {
+            return null;
+        }
+
+        $datetime = clone $this->scheduledDate;
+        $datetime->setTime(
+            (int) $this->scheduledTime->format('H'),
+            (int) $this->scheduledTime->format('i'),
+            (int) $this->scheduledTime->format('s')
+        );
+
+        return $datetime;
     }
 
     public function getDuration(): ?int
@@ -264,22 +584,23 @@ class Booking
         return $this;
     }
 
-    public function getDurationFormatted(): string
+    /**
+     * Retourne la durée formatée (ex: "2h30")
+     */
+    public function getFormattedDuration(): string
     {
         if (!$this->duration) {
-            return '0 min';
+            return '0h';
         }
 
         $hours = floor($this->duration / 60);
         $minutes = $this->duration % 60;
 
-        if ($hours > 0 && $minutes > 0) {
-            return sprintf('%dh%02d', $hours, $minutes);
-        } elseif ($hours > 0) {
-            return sprintf('%dh', $hours);
-        } else {
-            return sprintf('%d min', $minutes);
+        if ($minutes === 0) {
+            return "{$hours}h";
         }
+
+        return "{$hours}h{$minutes}";
     }
 
     public function getAddress(): ?string
@@ -315,6 +636,9 @@ class Booking
         return $this;
     }
 
+    /**
+     * Retourne l'adresse complète formatée
+     */
     public function getFullAddress(): string
     {
         return sprintf('%s, %s %s', $this->address, $this->postalCode, $this->city);
@@ -342,6 +666,14 @@ class Booking
         return $this;
     }
 
+    /**
+     * Vérifie si la réservation a des coordonnées GPS
+     */
+    public function hasCoordinates(): bool
+    {
+        return $this->latitude !== null && $this->longitude !== null;
+    }
+
     public function getAmount(): ?string
     {
         return $this->amount;
@@ -353,9 +685,12 @@ class Booking
         return $this;
     }
 
+    /**
+     * Retourne le montant formaté (ex: "45,50 €")
+     */
     public function getFormattedAmount(): string
     {
-        return number_format((float)$this->amount, 2, ',', ' ') . ' €';
+        return number_format((float) $this->amount, 2, ',', ' ') . ' €';
     }
 
     public function getStatus(): string
@@ -365,45 +700,46 @@ class Booking
 
     public function setStatus(string $status): self
     {
+        $oldStatus = $this->status;
         $this->status = $status;
-        
-        if ($status === 'confirmed') {
-            $this->confirmedAt = new \DateTimeImmutable();
-        } elseif ($status === 'completed') {
-            $this->completedAt = new \DateTimeImmutable();
-        } elseif ($status === 'cancelled') {
-            $this->cancelledAt = new \DateTimeImmutable();
+
+        // Mise à jour automatique des dates selon le statut
+        $now = new \DateTimeImmutable();
+
+        if ($status === self::STATUS_CONFIRMED && $this->confirmedAt === null) {
+            $this->confirmedAt = $now;
+        } elseif ($status === self::STATUS_COMPLETED && $this->completedAt === null) {
+            $this->completedAt = $now;
+            if ($this->actualEndTime === null) {
+                $this->actualEndTime = new \DateTime();
+            }
+        } elseif ($status === self::STATUS_CANCELLED && $this->cancelledAt === null) {
+            $this->cancelledAt = $now;
+        } elseif ($status === self::STATUS_REFUNDED && $this->refundedAt === null) {
+            $this->refundedAt = $now;
         }
-        
+
         return $this;
     }
 
+    /**
+     * Retourne le libellé du statut en français
+     */
     public function getStatusLabel(): string
     {
-        return match($this->status) {
-            'scheduled' => 'Planifié',
-            'confirmed' => 'Confirmé',
-            'in_progress' => 'En cours',
-            'completed' => 'Terminé',
-            'cancelled' => 'Annulé',
-            default => $this->status,
+        return match ($this->status) {
+            self::STATUS_PENDING => 'En attente',
+            self::STATUS_AWAITING_PAYMENT => 'En attente de paiement',
+            self::STATUS_SCHEDULED => 'Planifié',
+            self::STATUS_CONFIRMED => 'Confirmé',
+            self::STATUS_IN_PROGRESS => 'En cours',
+            self::STATUS_COMPLETED => 'Terminé',
+            self::STATUS_CANCELLED => 'Annulé',
+            self::STATUS_NO_SHOW => 'Client absent',
+            self::STATUS_DISPUTED => 'Litige',
+            self::STATUS_REFUNDED => 'Remboursé',
+            default => $this->status
         };
-    }
-
-    public function getRecurrence(): ?Recurrence
-    {
-        return $this->recurrence;
-    }
-
-    public function setRecurrence(?Recurrence $recurrence): self
-    {
-        $this->recurrence = $recurrence;
-        return $this;
-    }
-
-    public function isRecurrent(): bool
-    {
-        return $this->recurrence !== null;
     }
 
     public function getActualStartTime(): ?\DateTime
@@ -428,33 +764,17 @@ class Booking
         return $this;
     }
 
+    /**
+     * Calcule la durée réelle du service en minutes
+     */
     public function getActualDuration(): ?int
     {
         if (!$this->actualStartTime || !$this->actualEndTime) {
             return null;
         }
-        
+
         $diff = $this->actualEndTime->getTimestamp() - $this->actualStartTime->getTimestamp();
-        return (int) ($diff / 60); // en minutes
-    }
-
-    public function getActualDurationFormatted(): ?string
-    {
-        $duration = $this->getActualDuration();
-        if (!$duration) {
-            return null;
-        }
-
-        $hours = floor($duration / 60);
-        $minutes = $duration % 60;
-
-        if ($hours > 0 && $minutes > 0) {
-            return sprintf('%dh%02d', $hours, $minutes);
-        } elseif ($hours > 0) {
-            return sprintf('%dh', $hours);
-        } else {
-            return sprintf('%d min', $minutes);
-        }
+        return (int) round($diff / 60);
     }
 
     public function getCompletionNotes(): ?string
@@ -490,11 +810,12 @@ class Booking
         return $this;
     }
 
-    public function addClientInstruction(string $instruction): self
+    public function addClientInstruction(string $key, mixed $value): self
     {
-        $instructions = $this->getClientInstructions();
-        $instructions[] = $instruction;
-        $this->clientInstructions = $instructions;
+        if ($this->clientInstructions === null) {
+            $this->clientInstructions = [];
+        }
+        $this->clientInstructions[$key] = $value;
         return $this;
     }
 
@@ -509,14 +830,12 @@ class Booking
         return $this;
     }
 
-    public function addPrestataireNote(string $note): self
+    public function addPrestataireNote(string $key, mixed $value): self
     {
-        $notes = $this->getPrestataireNotes();
-        $notes[] = [
-            'note' => $note,
-            'created_at' => (new \DateTime())->format('Y-m-d H:i:s')
-        ];
-        $this->prestataireNotes = $notes;
+        if ($this->prestataireNotes === null) {
+            $this->prestataireNotes = [];
+        }
+        $this->prestataireNotes[$key] = $value;
         return $this;
     }
 
@@ -553,7 +872,146 @@ class Booking
         return $this;
     }
 
-    public function getCreatedAt(): ?\DateTimeImmutable
+    public function isReminderSent24h(): bool
+    {
+        return $this->reminderSent24h;
+    }
+
+    public function setReminderSent24h(bool $reminderSent24h): self
+    {
+        $this->reminderSent24h = $reminderSent24h;
+        return $this;
+    }
+
+    public function isReminderSent2h(): bool
+    {
+        return $this->reminderSent2h;
+    }
+
+    public function setReminderSent2h(bool $reminderSent2h): self
+    {
+        $this->reminderSent2h = $reminderSent2h;
+        return $this;
+    }
+
+    public function getPayment(): ?Payment
+    {
+        return $this->payment;
+    }
+
+    public function setPayment(?Payment $payment): self
+    {
+        // Synchronisation bidirectionnelle
+        if ($payment === null && $this->payment !== null) {
+            $this->payment->setBooking(null);
+        }
+
+        if ($payment !== null && $payment->getBooking() !== $this) {
+            $payment->setBooking($this);
+        }
+
+        $this->payment = $payment;
+        return $this;
+    }
+
+    /**
+     * Vérifie si la réservation est payée
+     */
+    public function isPaid(): bool
+    {
+        return $this->payment !== null && $this->payment->getStatus() === 'completed';
+    }
+
+    public function getReview(): ?Review
+    {
+        return $this->review;
+    }
+
+    public function setReview(?Review $review): self
+    {
+        // Synchronisation bidirectionnelle
+        if ($review === null && $this->review !== null) {
+            $this->review->setBooking(null);
+        }
+
+        if ($review !== null && $review->getBooking() !== $this) {
+            $review->setBooking($this);
+        }
+
+        $this->review = $review;
+        return $this;
+    }
+
+    /**
+     * Vérifie si la réservation a un avis
+     */
+    public function hasReview(): bool
+    {
+        return $this->review !== null;
+    }
+
+    /**
+     * @return Collection<int, Replacement>
+     */
+    public function getReplacements(): Collection
+    {
+        return $this->replacements;
+    }
+
+    public function addReplacement(Replacement $replacement): self
+    {
+        if (!$this->replacements->contains($replacement)) {
+            $this->replacements->add($replacement);
+            $replacement->setOriginalBooking($this);
+        }
+
+        return $this;
+    }
+
+    public function removeReplacement(Replacement $replacement): self
+    {
+        if ($this->replacements->removeElement($replacement)) {
+            if ($replacement->getOriginalBooking() === $this) {
+                $replacement->setOriginalBooking(null);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Vérifie si la réservation a des remplacements
+     */
+    public function hasReplacements(): bool
+    {
+        return !$this->replacements->isEmpty();
+    }
+
+    /**
+     * Récupère le remplacement actif (confirmé)
+     */
+    public function getActiveReplacement(): ?Replacement
+    {
+        foreach ($this->replacements as $replacement) {
+            if ($replacement->isConfirmed()) {
+                return $replacement;
+            }
+        }
+        return null;
+    }
+
+    public function getCancelledBy(): ?User
+    {
+        return $this->cancelledBy;
+    }
+
+    public function setCancelledBy(?User $cancelledBy): self
+    {
+        $this->cancelledBy = $cancelledBy;
+        return $this;
+    }
+
+    public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
     }
@@ -564,7 +1022,7 @@ class Booking
         return $this;
     }
 
-    public function getUpdatedAt(): ?\DateTimeImmutable
+    public function getUpdatedAt(): \DateTimeImmutable
     {
         return $this->updatedAt;
     }
@@ -608,234 +1066,277 @@ class Booking
         return $this;
     }
 
-    public function getCancelledBy(): ?User
+    public function getRefundedAt(): ?\DateTimeImmutable
     {
-        return $this->cancelledBy;
+        return $this->refundedAt;
     }
 
-    public function setCancelledBy(?User $cancelledBy): self
+    public function setRefundedAt(?\DateTimeImmutable $refundedAt): self
     {
-        $this->cancelledBy = $cancelledBy;
+        $this->refundedAt = $refundedAt;
         return $this;
     }
 
-    public function getPayment(): ?Payment
+    // ==================== MÉTHODES UTILITAIRES ====================
+
+    /**
+     * Vérifie si la réservation est en attente
+     */
+    public function isPending(): bool
     {
-        return $this->payment;
-    }
-
-    public function setPayment(?Payment $payment): self
-    {
-        // unset the owning side of the relation if necessary
-        if ($payment === null && $this->payment !== null) {
-            $this->payment->setBooking(null);
-        }
-
-        // set the owning side of the relation if necessary
-        if ($payment !== null && $payment->getBooking() !== $this) {
-            $payment->setBooking($this);
-        }
-
-        $this->payment = $payment;
-
-        return $this;
-    }
-
-    public function isPaid(): bool
-    {
-        return $this->payment && $this->payment->getStatus() === 'completed';
-    }
-
-    public function getReview(): ?Review
-    {
-        return $this->review;
-    }
-
-    public function setReview(?Review $review): self
-    {
-        // unset the owning side of the relation if necessary
-        if ($review === null && $this->review !== null) {
-            $this->review->setBooking(null);
-        }
-
-        // set the owning side of the relation if necessary
-        if ($review !== null && $review->getBooking() !== $this) {
-            $review->setBooking($this);
-        }
-
-        $this->review = $review;
-
-        return $this;
-    }
-
-    public function hasReview(): bool
-    {
-        return $this->review !== null;
+        return $this->status === self::STATUS_PENDING;
     }
 
     /**
-     * @return Collection<int, Replacement>
+     * Vérifie si la réservation est en attente de paiement
      */
-    public function getReplacements(): Collection
+    public function isAwaitingPayment(): bool
     {
-        return $this->replacements;
+        return $this->status === self::STATUS_AWAITING_PAYMENT;
     }
 
-    public function addReplacement(Replacement $replacement): self
+    /**
+     * Vérifie si la réservation est planifiée
+     */
+    public function isScheduled(): bool
     {
-        if (!$this->replacements->contains($replacement)) {
-            $this->replacements->add($replacement);
-            $replacement->setOriginalBooking($this);
-        }
-
-        return $this;
+        return $this->status === self::STATUS_SCHEDULED;
     }
 
-    public function removeReplacement(Replacement $replacement): self
+    /**
+     * Vérifie si la réservation est confirmée
+     */
+    public function isConfirmed(): bool
     {
-        if ($this->replacements->removeElement($replacement)) {
-            if ($replacement->getOriginalBooking() === $this) {
-                $replacement->setOriginalBooking(null);
-            }
-        }
-
-        return $this;
+        return $this->status === self::STATUS_CONFIRMED;
     }
 
-    public function hasActiveReplacement(): bool
+    /**
+     * Vérifie si la réservation est en cours
+     */
+    public function isInProgress(): bool
     {
-        foreach ($this->replacements as $replacement) {
-            if ($replacement->getStatus() === 'confirmed') {
-                return true;
-            }
-        }
-        return false;
+        return $this->status === self::STATUS_IN_PROGRESS;
     }
 
-    public function getActiveReplacement(): ?Replacement
+    /**
+     * Vérifie si la réservation est terminée
+     */
+    public function isCompleted(): bool
     {
-        foreach ($this->replacements as $replacement) {
-            if ($replacement->getStatus() === 'confirmed') {
-                return $replacement;
-            }
-        }
-        return null;
+        return $this->status === self::STATUS_COMPLETED;
     }
 
-    public function isReminderSent24h(): bool
+    /**
+     * Vérifie si la réservation est annulée
+     */
+    public function isCancelled(): bool
     {
-        return $this->reminderSent24h;
+        return $this->status === self::STATUS_CANCELLED;
     }
 
-    public function setReminderSent24h(bool $reminderSent24h): self
+    /**
+     * Vérifie si la réservation est remboursée
+     */
+    public function isRefunded(): bool
     {
-        $this->reminderSent24h = $reminderSent24h;
-        return $this;
+        return $this->status === self::STATUS_REFUNDED;
     }
 
-    public function isReminderSent2h(): bool
+    /**
+     * Vérifie si la réservation est en litige
+     */
+    public function isDisputed(): bool
     {
-        return $this->reminderSent2h;
+        return $this->status === self::STATUS_DISPUTED;
     }
 
-    public function setReminderSent2h(bool $reminderSent2h): self
-    {
-        $this->reminderSent2h = $reminderSent2h;
-        return $this;
-    }
-
-    public function getReferenceNumber(): ?string
-    {
-        return $this->referenceNumber;
-    }
-
-    public function setReferenceNumber(?string $referenceNumber): self
-    {
-        $this->referenceNumber = $referenceNumber;
-        return $this;
-    }
-
-    private function generateReferenceNumber(): void
-    {
-        $this->referenceNumber = 'BKG' . strtoupper(uniqid());
-    }
-
-    // Méthodes utilitaires
-
-    public function isUpcoming(): bool
-    {
-        return $this->getScheduledDateTime() > new \DateTime();
-    }
-
-    public function isPast(): bool
-    {
-        return $this->getScheduledDateTime() < new \DateTime();
-    }
-
-    public function isToday(): bool
-    {
-        $scheduled = $this->getScheduledDateTime();
-        $today = new \DateTime();
-        return $scheduled->format('Y-m-d') === $today->format('Y-m-d');
-    }
-
+    /**
+     * Vérifie si la réservation peut être annulée
+     */
     public function canBeCancelled(): bool
     {
-        return in_array($this->status, ['scheduled', 'confirmed']) && $this->isUpcoming();
+        return in_array($this->status, [
+            self::STATUS_PENDING,
+            self::STATUS_AWAITING_PAYMENT,
+            self::STATUS_SCHEDULED,
+            self::STATUS_CONFIRMED
+        ]);
     }
 
-    public function canBeRescheduled(): bool
+    /**
+     * Vérifie si la réservation peut être modifiée
+     */
+    public function canBeModified(): bool
     {
-        return in_array($this->status, ['scheduled', 'confirmed']) && $this->isUpcoming();
+        return in_array($this->status, [
+            self::STATUS_PENDING,
+            self::STATUS_SCHEDULED,
+            self::STATUS_CONFIRMED
+        ]);
     }
 
+    /**
+     * Vérifie si la réservation peut être démarrée
+     */
+    public function canBeStarted(): bool
+    {
+        return $this->status === self::STATUS_CONFIRMED;
+    }
+
+    /**
+     * Vérifie si la réservation peut être terminée
+     */
     public function canBeCompleted(): bool
     {
-        return $this->status === 'in_progress';
+        return $this->status === self::STATUS_IN_PROGRESS;
     }
 
+    /**
+     * Vérifie si la réservation peut recevoir un avis
+     */
     public function canBeReviewed(): bool
     {
-        return $this->status === 'completed' && !$this->hasReview();
+        return $this->status === self::STATUS_COMPLETED;
     }
 
-    public function getTimeUntilStart(): ?\DateInterval
+    /**
+     * Vérifie si la réservation nécessite un paiement
+     */
+    public function requiresPayment(): bool
     {
-        if (!$this->isUpcoming()) {
+        return in_array($this->status, [
+            self::STATUS_PENDING,
+            self::STATUS_AWAITING_PAYMENT,
+            self::STATUS_CONFIRMED,
+            self::STATUS_SCHEDULED,
+            self::STATUS_IN_PROGRESS
+        ]);
+    }
+
+    /**
+     * Vérifie si la réservation peut être remboursée
+     */
+    public function canBeRefunded(): bool
+    {
+        return in_array($this->status, [
+            self::STATUS_CONFIRMED,
+            self::STATUS_SCHEDULED,
+            self::STATUS_COMPLETED,
+            self::STATUS_NO_SHOW
+        ]);
+    }
+
+    /**
+     * Vérifie si la réservation est passée
+     */
+    public function isPast(): bool
+    {
+        if (!$this->scheduledDate) {
+            return false;
+        }
+
+        $scheduled = $this->getScheduledDateTime();
+        if (!$scheduled) {
+            return false;
+        }
+
+        return $scheduled < new \DateTime();
+    }
+
+    /**
+     * Vérifie si la réservation est dans les prochaines 24h
+     */
+    public function isUpcoming24h(): bool
+    {
+        if (!$this->scheduledDate) {
+            return false;
+        }
+
+        $scheduled = $this->getScheduledDateTime();
+        if (!$scheduled) {
+            return false;
+        }
+
+        $now = new \DateTime();
+        $in24h = (clone $now)->modify('+24 hours');
+
+        return $scheduled > $now && $scheduled <= $in24h;
+    }
+
+    /**
+     * Vérifie si la réservation est dans les prochaines 2h
+     */
+    public function isUpcoming2h(): bool
+    {
+        if (!$this->scheduledDate) {
+            return false;
+        }
+
+        $scheduled = $this->getScheduledDateTime();
+        if (!$scheduled) {
+            return false;
+        }
+
+        $now = new \DateTime();
+        $in2h = (clone $now)->modify('+2 hours');
+
+        return $scheduled > $now && $scheduled <= $in2h;
+    }
+
+    /**
+     * Vérifie si c'est une réservation récurrente
+     */
+    public function isRecurring(): bool
+    {
+        return $this->recurrence !== null;
+    }
+
+    /**
+     * Calcule le temps restant avant la réservation
+     */
+    public function getTimeUntilBooking(): ?\DateInterval
+    {
+        $scheduled = $this->getScheduledDateTime();
+        if (!$scheduled) {
             return null;
         }
 
         $now = new \DateTime();
-        return $now->diff($this->getScheduledDateTime());
-    }
-
-    public function getHoursUntilStart(): ?int
-    {
-        $interval = $this->getTimeUntilStart();
-        if (!$interval) {
-            return null;
+        if ($scheduled > $now) {
+            return $now->diff($scheduled);
         }
 
-        return ($interval->days * 24) + $interval->h;
+        return null;
     }
 
-    public function needsReminder24h(): bool
+    /**
+     * Retourne une représentation textuelle
+     */
+    public function __toString(): string
     {
-        if ($this->reminderSent24h || !$this->isUpcoming()) {
-            return false;
-        }
-
-        $hours = $this->getHoursUntilStart();
-        return $hours !== null && $hours <= 24 && $hours > 2;
+        $date = $this->scheduledDate ? $this->scheduledDate->format('d/m/Y') : 'N/A';
+        $time = $this->scheduledTime ? $this->scheduledTime->format('H:i') : 'N/A';
+        
+        return "Réservation #{$this->id} - {$date} à {$time}";
     }
 
-    public function needsReminder2h(): bool
+    /**
+     * Liste de tous les statuts disponibles
+     */
+    public static function getAvailableStatuses(): array
     {
-        if ($this->reminderSent2h || !$this->isUpcoming()) {
-            return false;
-        }
-
-        $hours = $this->getHoursUntilStart();
-        return $hours !== null && $hours <= 2;
+        return [
+            self::STATUS_PENDING,
+            self::STATUS_AWAITING_PAYMENT,
+            self::STATUS_SCHEDULED,
+            self::STATUS_CONFIRMED,
+            self::STATUS_IN_PROGRESS,
+            self::STATUS_COMPLETED,
+            self::STATUS_CANCELLED,
+            self::STATUS_NO_SHOW,
+            self::STATUS_DISPUTED,
+            self::STATUS_REFUNDED
+        ];
     }
 }

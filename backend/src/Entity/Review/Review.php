@@ -1,113 +1,288 @@
 <?php
-// src/Entity/Review/Review.php
 
-namespace App\Review\Entity;
+namespace App\Entity\Review;
 
-use App\Repository\ReviewRepository;
-use Doctrine\ORM\Mapping as ORM;
-use Symfony\Component\Validator\Constraints as Assert;
 use App\Entity\Booking\Booking;
-use App\Entity\User\Client; 
-use App\Entity\Planning\Prestataire;
+use App\Entity\User\Client;
+use App\Entity\User\Prestataire;
+use App\Repository\Review\ReviewRepository;
+use Doctrine\DBAL\Types\Types;
+use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Serializer\Annotation\Groups;
+use Symfony\Component\Validator\Constraints as Assert;
+
+/**
+ * Représente un avis laissé par un client sur un prestataire
+ * Créé après la complétion d'une réservation
+ * Permet d'évaluer la qualité du service sur plusieurs critères
+ */
 #[ORM\Entity(repositoryClass: ReviewRepository::class)]
 #[ORM\Table(name: 'reviews')]
+#[ORM\Index(columns: ['prestataire_id', 'is_published'], name: 'idx_prestataire_published')]
+#[ORM\Index(columns: ['client_id'], name: 'idx_client')]
+#[ORM\Index(columns: ['booking_id'], name: 'idx_booking')]
+#[ORM\Index(columns: ['rating'], name: 'idx_rating')]
+#[ORM\Index(columns: ['is_verified'], name: 'idx_verified')]
+#[ORM\Index(columns: ['created_at'], name: 'idx_created')]
+#[ORM\UniqueConstraint(name: 'unique_booking_review', columns: ['booking_id'])]
 #[ORM\HasLifecycleCallbacks]
 class Review
 {
     #[ORM\Id]
     #[ORM\GeneratedValue]
-    #[ORM\Column(type: 'integer')]
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Groups(['review:read', 'review:list', 'prestataire:read', 'booking:read'])]
     private ?int $id = null;
 
-    #[ORM\ManyToOne(targetEntity: Booking::class, inversedBy: 'reviews')]
-    #[ORM\JoinColumn(nullable: false)]
+    /**
+     * Réservation évaluée (relation 1:1)
+     */
+    #[ORM\OneToOne(inversedBy: 'review', targetEntity: Booking::class)]
+    #[ORM\JoinColumn(nullable: false, unique: true, onDelete: 'CASCADE')]
+    #[Assert\NotNull(message: 'La réservation est obligatoire', groups: ['review:create'])]
+    #[Groups(['review:read', 'review:detail'])]
     private ?Booking $booking = null;
 
+    /**
+     * Client qui laisse l'avis
+     */
     #[ORM\ManyToOne(targetEntity: Client::class, inversedBy: 'reviews')]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
+    #[Assert\NotNull(message: 'Le client est obligatoire', groups: ['review:create'])]
+    #[Groups(['review:read', 'review:list'])]
     private ?Client $client = null;
 
+    /**
+     * Prestataire évalué
+     */
     #[ORM\ManyToOne(targetEntity: Prestataire::class, inversedBy: 'reviews')]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
+    #[Assert\NotNull(message: 'Le prestataire est obligatoire', groups: ['review:create'])]
+    #[Groups(['review:read', 'review:list'])]
     private ?Prestataire $prestataire = null;
 
-    #[ORM\Column(type: 'integer')]
-    #[Assert\NotBlank]
-    #[Assert\Range(min: 1, max: 5)]
+    /**
+     * Note globale (1-5 étoiles)
+     */
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Assert\NotBlank(message: 'La note est obligatoire', groups: ['review:create'])]
+    #[Assert\Range(
+        min: 1,
+        max: 5,
+        notInRangeMessage: 'La note doit être entre {{ min }} et {{ max }}'
+    )]
+    #[Groups(['review:read', 'review:list', 'review:create'])]
     private ?int $rating = null;
 
-    #[ORM\Column(type: 'integer', nullable: true)]
-    #[Assert\Range(min: 1, max: 5)]
-    private ?int $qualityRating = null; // Note qualité du service
+    /**
+     * Note pour la qualité du service (1-5)
+     */
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    #[Assert\Range(
+        min: 1,
+        max: 5,
+        notInRangeMessage: 'La note qualité doit être entre {{ min }} et {{ max }}'
+    )]
+    #[Groups(['review:read', 'review:detail', 'review:create'])]
+    private ?int $qualityRating = null;
 
-    #[ORM\Column(type: 'integer', nullable: true)]
-    #[Assert\Range(min: 1, max: 5)]
-    private ?int $punctualityRating = null; // Note ponctualité
+    /**
+     * Note pour la ponctualité (1-5)
+     */
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    #[Assert\Range(
+        min: 1,
+        max: 5,
+        notInRangeMessage: 'La note ponctualité doit être entre {{ min }} et {{ max }}'
+    )]
+    #[Groups(['review:read', 'review:detail', 'review:create'])]
+    private ?int $punctualityRating = null;
 
-    #[ORM\Column(type: 'integer', nullable: true)]
-    #[Assert\Range(min: 1, max: 5)]
-    private ?int $professionalismRating = null; // Note professionnalisme
+    /**
+     * Note pour le professionnalisme (1-5)
+     */
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    #[Assert\Range(
+        min: 1,
+        max: 5,
+        notInRangeMessage: 'La note professionnalisme doit être entre {{ min }} et {{ max }}'
+    )]
+    #[Groups(['review:read', 'review:detail', 'review:create'])]
+    private ?int $professionalismRating = null;
 
-    #[ORM\Column(type: 'integer', nullable: true)]
-    #[Assert\Range(min: 1, max: 5)]
-    private ?int $communicationRating = null; // Note communication
+    /**
+     * Note pour la communication (1-5)
+     */
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    #[Assert\Range(
+        min: 1,
+        max: 5,
+        notInRangeMessage: 'La note communication doit être entre {{ min }} et {{ max }}'
+    )]
+    #[Groups(['review:read', 'review:detail', 'review:create'])]
+    private ?int $communicationRating = null;
 
-    #[ORM\Column(type: 'text', nullable: true)]
-    #[Assert\Length(max: 2000)]
+    /**
+     * Commentaire du client
+     */
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
+    #[Assert\Length(
+        min: 10,
+        max: 2000,
+        minMessage: 'Le commentaire doit faire au moins {{ limit }} caractères',
+        maxMessage: 'Le commentaire ne peut pas dépasser {{ limit }} caractères'
+    )]
+    #[Groups(['review:read', 'review:list', 'review:create', 'review:update'])]
     private ?string $comment = null;
 
-    #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $response = null; // Réponse du prestataire
+    /**
+     * Réponse du prestataire à l'avis
+     */
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
+    #[Assert\Length(
+        max: 1000,
+        maxMessage: 'La réponse ne peut pas dépasser {{ limit }} caractères'
+    )]
+    #[Groups(['review:read', 'review:detail'])]
+    private ?string $response = null;
 
-    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    /**
+     * Date de réponse du prestataire
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    #[Groups(['review:read', 'review:detail'])]
     private ?\DateTimeImmutable $respondedAt = null;
 
-    #[ORM\Column(type: 'boolean')]
+    /**
+     * Le client recommande-t-il ce prestataire ?
+     */
+    #[ORM\Column(type: Types::BOOLEAN)]
+    #[Groups(['review:read', 'review:list', 'review:create'])]
+    private bool $wouldRecommend = true;
+
+    /**
+     * Photos jointes à l'avis (URLs)
+     */
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    #[Assert\Count(
+        max: 5,
+        maxMessage: 'Vous ne pouvez pas joindre plus de {{ limit }} photos'
+    )]
+    #[Groups(['review:read', 'review:detail', 'review:create'])]
+    private ?array $photos = [];
+
+    /**
+     * Avis vérifié (service effectivement réalisé)
+     */
+    #[ORM\Column(type: Types::BOOLEAN)]
+    #[Groups(['review:read', 'review:list'])]
     private bool $isVerified = false;
 
-    #[ORM\Column(type: 'boolean')]
+    /**
+     * Avis publié (visible publiquement)
+     */
+    #[ORM\Column(type: Types::BOOLEAN)]
+    #[Groups(['review:read', 'review:list', 'review:update'])]
     private bool $isPublished = true;
 
-    #[ORM\Column(type: 'boolean')]
-    private bool $isRecommended = true; // Le client recommande-t-il ?
+    /**
+     * Avis signalé comme inapproprié
+     */
+    #[ORM\Column(type: Types::BOOLEAN)]
+    #[Groups(['review:admin'])]
+    private bool $isFlagged = false;
 
-    #[ORM\Column(type: 'boolean')]
-    private bool $isFlagged = false; // Signalé comme inapproprié
-
-    #[ORM\Column(type: 'string', length: 255, nullable: true)]
+    /**
+     * Raison du signalement
+     */
+    #[ORM\Column(type: Types::STRING, length: 255, nullable: true)]
+    #[Assert\Length(
+        max: 255,
+        maxMessage: 'La raison ne peut pas dépasser {{ limit }} caractères'
+    )]
+    #[Groups(['review:admin'])]
     private ?string $flagReason = null;
 
-    #[ORM\Column(type: 'integer')]
-    private int $helpfulCount = 0; // Nombre de "utile"
+    /**
+     * Date du signalement
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    #[Groups(['review:admin'])]
+    private ?\DateTimeImmutable $flaggedAt = null;
 
-    #[ORM\Column(type: 'integer')]
-    private int $notHelpfulCount = 0; // Nombre de "pas utile"
+    /**
+     * Nombre de personnes ayant trouvé cet avis utile
+     */
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Groups(['review:read', 'review:list'])]
+    private int $helpfulCount = 0;
 
-    #[ORM\Column(type: 'json', nullable: true)]
-    private ?array $tags = []; // Tags du service (propre, rapide, soigneux, etc.)
+    /**
+     * Nombre de personnes n'ayant pas trouvé cet avis utile
+     */
+    #[ORM\Column(type: Types::INTEGER)]
+    #[Groups(['review:read', 'review:list'])]
+    private int $notHelpfulCount = 0;
 
-    #[ORM\Column(type: 'json', nullable: true)]
+    /**
+     * Tags associés à l'avis (propre, rapide, soigneux, etc.)
+     */
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    #[Groups(['review:read', 'review:detail', 'review:create'])]
+    private ?array $tags = [];
+
+    /**
+     * Métadonnées additionnelles (context, informations supplémentaires)
+     */
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    #[Groups(['review:admin'])]
     private ?array $metadata = [];
 
-    #[ORM\Column(type: 'datetime_immutable')]
-    private ?\DateTimeImmutable $createdAt = null;
+    /**
+     * Date de création de l'avis
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
+    #[Groups(['review:read', 'review:list'])]
+    private \DateTimeImmutable $createdAt;
 
-    #[ORM\Column(type: 'datetime_immutable')]
+    /**
+     * Date de dernière modification
+     */
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    #[Groups(['review:read'])]
     private ?\DateTimeImmutable $updatedAt = null;
 
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
-        $this->updatedAt = new \DateTimeImmutable();
+        $this->photos = [];
+        $this->tags = [];
+        $this->metadata = [];
+        $this->isVerified = false;
+        $this->isPublished = true;
+        $this->isFlagged = false;
+        $this->wouldRecommend = true;
+        $this->helpfulCount = 0;
+        $this->notHelpfulCount = 0;
+    }
+
+    // ==================== LIFECYCLE CALLBACKS ====================
+
+    #[ORM\PrePersist]
+    public function onPrePersist(): void
+    {
+        if ($this->createdAt === null) {
+            $this->createdAt = new \DateTimeImmutable();
+        }
     }
 
     #[ORM\PreUpdate]
-    public function preUpdate(): void
+    public function onPreUpdate(): void
     {
         $this->updatedAt = new \DateTimeImmutable();
     }
 
-    // Getters and Setters
+    // ==================== GETTERS / SETTERS ====================
 
     public function getId(): ?int
     {
@@ -221,6 +396,12 @@ class Review
     public function setResponse(?string $response): self
     {
         $this->response = $response;
+        
+        // Mettre à jour automatiquement la date de réponse
+        if ($response !== null && $this->respondedAt === null) {
+            $this->respondedAt = new \DateTimeImmutable();
+        }
+        
         return $this;
     }
 
@@ -233,6 +414,61 @@ class Review
     {
         $this->respondedAt = $respondedAt;
         return $this;
+    }
+
+    public function wouldRecommend(): bool
+    {
+        return $this->wouldRecommend;
+    }
+
+    public function setWouldRecommend(bool $wouldRecommend): self
+    {
+        $this->wouldRecommend = $wouldRecommend;
+        return $this;
+    }
+
+    public function getPhotos(): ?array
+    {
+        return $this->photos ?? [];
+    }
+
+    public function setPhotos(?array $photos): self
+    {
+        $this->photos = $photos;
+        return $this;
+    }
+
+    public function addPhoto(string $photoUrl): self
+    {
+        if ($this->photos === null) {
+            $this->photos = [];
+        }
+        
+        if (!in_array($photoUrl, $this->photos) && count($this->photos) < 5) {
+            $this->photos[] = $photoUrl;
+        }
+        
+        return $this;
+    }
+
+    public function removePhoto(string $photoUrl): self
+    {
+        if ($this->photos === null) {
+            return $this;
+        }
+        
+        $key = array_search($photoUrl, $this->photos);
+        if ($key !== false) {
+            unset($this->photos[$key]);
+            $this->photos = array_values($this->photos);
+        }
+        
+        return $this;
+    }
+
+    public function hasPhotos(): bool
+    {
+        return !empty($this->photos);
     }
 
     public function isVerified(): bool
@@ -257,17 +493,6 @@ class Review
         return $this;
     }
 
-    public function isRecommended(): bool
-    {
-        return $this->isRecommended;
-    }
-
-    public function setIsRecommended(bool $isRecommended): self
-    {
-        $this->isRecommended = $isRecommended;
-        return $this;
-    }
-
     public function isFlagged(): bool
     {
         return $this->isFlagged;
@@ -287,6 +512,17 @@ class Review
     public function setFlagReason(?string $flagReason): self
     {
         $this->flagReason = $flagReason;
+        return $this;
+    }
+
+    public function getFlaggedAt(): ?\DateTimeImmutable
+    {
+        return $this->flaggedAt;
+    }
+
+    public function setFlaggedAt(?\DateTimeImmutable $flaggedAt): self
+    {
+        $this->flaggedAt = $flaggedAt;
         return $this;
     }
 
@@ -356,6 +592,11 @@ class Review
         return $this;
     }
 
+    public function hasTag(string $tag): bool
+    {
+        return in_array($tag, $this->getTags());
+    }
+
     public function getMetadata(): ?array
     {
         return $this->metadata ?? [];
@@ -369,19 +610,20 @@ class Review
 
     public function addMetadata(string $key, mixed $value): self
     {
-        $metadata = $this->getMetadata();
-        $metadata[$key] = $value;
-        $this->metadata = $metadata;
+        if ($this->metadata === null) {
+            $this->metadata = [];
+        }
+        
+        $this->metadata[$key] = $value;
         return $this;
     }
 
     public function getMetadataValue(string $key): mixed
     {
-        $metadata = $this->getMetadata();
-        return $metadata[$key] ?? null;
+        return $this->metadata[$key] ?? null;
     }
 
-    public function getCreatedAt(): ?\DateTimeImmutable
+    public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
     }
@@ -397,14 +639,16 @@ class Review
         return $this->updatedAt;
     }
 
-    public function setUpdatedAt(\DateTimeImmutable $updatedAt): self
+    public function setUpdatedAt(?\DateTimeImmutable $updatedAt): self
     {
         $this->updatedAt = $updatedAt;
         return $this;
     }
 
+    // ==================== MÉTHODES UTILITAIRES ====================
+
     /**
-     * Calcule la note moyenne de tous les critères
+     * Calcule la note moyenne de tous les critères détaillés
      */
     public function getAverageDetailedRating(): float
     {
@@ -416,18 +660,29 @@ class Review
         ]);
 
         if (empty($ratings)) {
-            return (float)$this->rating;
+            return (float) $this->rating;
         }
 
         return round(array_sum($ratings) / count($ratings), 2);
     }
 
     /**
-     * Vérifie si l'avis a une réponse
+     * Vérifie si l'avis a des notes détaillées
+     */
+    public function hasDetailedRatings(): bool
+    {
+        return $this->qualityRating !== null
+            || $this->punctualityRating !== null
+            || $this->professionalismRating !== null
+            || $this->communicationRating !== null;
+    }
+
+    /**
+     * Vérifie si l'avis a une réponse du prestataire
      */
     public function hasResponse(): bool
     {
-        return !empty($this->response);
+        return $this->response !== null && !empty($this->response);
     }
 
     /**
@@ -445,7 +700,7 @@ class Review
     {
         $total = $this->getTotalVotes();
         if ($total === 0) {
-            return 0;
+            return 0.0;
         }
 
         return round(($this->helpfulCount / $total) * 100, 2);
@@ -485,6 +740,24 @@ class Review
     }
 
     /**
+     * Publie l'avis
+     */
+    public function publish(): self
+    {
+        $this->isPublished = true;
+        return $this;
+    }
+
+    /**
+     * Dépublie l'avis
+     */
+    public function unpublish(): self
+    {
+        $this->isPublished = false;
+        return $this;
+    }
+
+    /**
      * Ajoute une réponse du prestataire
      */
     public function respond(string $response): self
@@ -501,6 +774,7 @@ class Review
     {
         $this->isFlagged = true;
         $this->flagReason = $reason;
+        $this->flaggedAt = new \DateTimeImmutable();
         return $this;
     }
 
@@ -511,6 +785,7 @@ class Review
     {
         $this->isFlagged = false;
         $this->flagReason = null;
+        $this->flaggedAt = null;
         return $this;
     }
 
@@ -522,12 +797,139 @@ class Review
         return str_repeat('★', $this->rating) . str_repeat('☆', 5 - $this->rating);
     }
 
+    /**
+     * Retourne les étoiles sous forme d'emoji
+     */
+    public function getStarsEmoji(): string
+    {
+        return str_repeat('⭐', $this->rating);
+    }
+
+    /**
+     * Obtient la classe CSS pour la note
+     */
+    public function getRatingClass(): string
+    {
+        return match (true) {
+            $this->rating >= 4 => 'rating-excellent',
+            $this->rating === 3 => 'rating-good',
+            $this->rating === 2 => 'rating-fair',
+            default => 'rating-poor'
+        };
+    }
+
+    /**
+     * Obtient le label de la note
+     */
+    public function getRatingLabel(): string
+    {
+        return match ($this->rating) {
+            5 => 'Excellent',
+            4 => 'Très bien',
+            3 => 'Bien',
+            2 => 'Moyen',
+            1 => 'Insuffisant',
+            default => 'Non noté'
+        };
+    }
+
+    /**
+     * Vérifie si l'avis peut être modifié
+     * Un avis peut être modifié dans les 7 jours suivant sa création
+     */
+    public function canBeEdited(): bool
+    {
+        if ($this->isFlagged) {
+            return false;
+        }
+
+        $now = new \DateTimeImmutable();
+        $editDeadline = $this->createdAt->modify('+7 days');
+        
+        return $now <= $editDeadline;
+    }
+
+    /**
+     * Vérifie si le prestataire peut répondre
+     */
+    public function canBeResponded(): bool
+    {
+        return $this->isPublished && !$this->hasResponse();
+    }
+
+    /**
+     * Calcule l'âge de l'avis
+     */
+    public function getAge(): \DateInterval
+    {
+        $now = new \DateTimeImmutable();
+        return $this->createdAt->diff($now);
+    }
+
+    /**
+     * Retourne l'âge de l'avis formaté (ex: "il y a 2 jours")
+     */
+    public function getAgeFormatted(): string
+    {
+        $age = $this->getAge();
+        
+        if ($age->y > 0) {
+            return $age->y === 1 ? 'il y a 1 an' : "il y a {$age->y} ans";
+        }
+        
+        if ($age->m > 0) {
+            return $age->m === 1 ? 'il y a 1 mois' : "il y a {$age->m} mois";
+        }
+        
+        if ($age->d > 0) {
+            return $age->d === 1 ? 'il y a 1 jour' : "il y a {$age->d} jours";
+        }
+        
+        if ($age->h > 0) {
+            return $age->h === 1 ? 'il y a 1 heure' : "il y a {$age->h} heures";
+        }
+        
+        return 'à l\'instant';
+    }
+
+    /**
+     * Retourne une représentation textuelle
+     */
     public function __toString(): string
     {
-        return sprintf(
-            'Avis %d/5 par %s',
-            $this->rating,
-            $this->client ? $this->client->getFullName() : 'Client'
-        );
+        $clientName = $this->client ? $this->client->getFullName() : 'Client';
+        return "Avis {$this->rating}/5 par {$clientName}";
+    }
+
+    /**
+     * Retourne les critères disponibles pour l'évaluation
+     */
+    public static function getAvailableCriteria(): array
+    {
+        return [
+            'quality' => 'Qualité du service',
+            'punctuality' => 'Ponctualité',
+            'professionalism' => 'Professionnalisme',
+            'communication' => 'Communication'
+        ];
+    }
+
+    /**
+     * Retourne les tags suggérés
+     */
+    public static function getSuggestedTags(): array
+    {
+        return [
+            'Propre',
+            'Rapide',
+            'Soigneux',
+            'Ponctuel',
+            'Professionnel',
+            'À l\'écoute',
+            'Efficace',
+            'Sympathique',
+            'Minutieux',
+            'Fiable'
+        ];
     }
 }

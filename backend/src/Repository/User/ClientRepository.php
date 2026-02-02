@@ -1,13 +1,18 @@
 <?php
-// src/Repository/ClientRepository.php
+// src/Repository/User/ClientRepository.php
 
 namespace App\Repository\User;
 
 use App\Entity\User\Client;
+use App\Entity\Service\ServiceCategory;
+use App\Entity\Service\ServiceSubcategory;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
+ * Repository pour l'entité Client
+ * Gère les requêtes spécifiques aux clients
+ * 
  * @extends ServiceEntityRepository<Client>
  */
 class ClientRepository extends ServiceEntityRepository
@@ -17,478 +22,820 @@ class ClientRepository extends ServiceEntityRepository
         parent::__construct($registry, Client::class);
     }
 
+    // ============================================
+    // RECHERCHE DE BASE
+    // ============================================
+
     /**
      * Trouve tous les clients actifs
      */
-    public function findAllActive(): array
+    public function findAllActive(bool $verifiedOnly = false): array
     {
-        return $this->createQueryBuilder('c')
+        $qb = $this->createQueryBuilder('c')
             ->andWhere('c.isActive = :active')
             ->setParameter('active', true)
+            ->orderBy('c.createdAt', 'DESC');
+
+        if ($verifiedOnly) {
+            $qb->andWhere('c.isVerified = :verified')
+               ->setParameter('verified', true);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve un client par email
+     */
+    public function findByEmail(string $email): ?Client
+    {
+        return $this->createQueryBuilder('c')
+            ->andWhere('c.email = :email')
+            ->setParameter('email', $email)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
+    /**
+     * Trouve un client par téléphone
+     */
+    public function findByPhone(string $phone): ?Client
+    {
+        return $this->createQueryBuilder('c')
+            ->andWhere('c.phone = :phone')
+            ->setParameter('phone', $phone)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
+    // ============================================
+    // RECHERCHE PAR ACTIVITÉ
+    // ============================================
+
+    /**
+     * Trouve les clients avec des demandes actives
+     */
+    public function findWithActiveRequests(): array
+    {
+        return $this->createQueryBuilder('c')
+            ->join('c.serviceRequests', 'sr')
+            ->andWhere('c.isActive = :active')
+            ->andWhere('sr.status IN (:statuses)')
+            ->setParameter('active', true)
+            ->setParameter('statuses', ['open', 'quoted', 'in_progress'])
+            ->groupBy('c.id')
             ->orderBy('c.createdAt', 'DESC')
             ->getQuery()
             ->getResult();
     }
 
     /**
-     * Trouve les meilleurs clients (par nombre de réservations)
+     * Trouve les clients avec des réservations actives
      */
-    public function findTopClients(int $limit = 10): array
+    public function findWithActiveBookings(): array
     {
         return $this->createQueryBuilder('c')
+            ->join('c.bookings', 'b')
+            ->andWhere('c.isActive = :active')
+            ->andWhere('b.status IN (:statuses)')
+            ->setParameter('active', true)
+            ->setParameter('statuses', ['scheduled', 'confirmed', 'in_progress'])
+            ->groupBy('c.id')
+            ->orderBy('c.createdAt', 'DESC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Trouve les clients inactifs depuis X jours
+     */
+    public function findInactiveSince(int $days = 90): array
+    {
+        $date = new \DateTimeImmutable("-{$days} days");
+
+        return $this->createQueryBuilder('c')
+            ->leftJoin('c.serviceRequests', 'sr')
+            ->leftJoin('c.bookings', 'b')
+            ->andWhere('c.isActive = :active')
+            ->andWhere('c.lastLoginAt < :date OR c.lastLoginAt IS NULL')
+            ->andWhere('sr.createdAt < :date OR sr.id IS NULL')
+            ->andWhere('b.createdAt < :date OR b.id IS NULL')
+            ->setParameter('active', true)
+            ->setParameter('date', $date)
+            ->groupBy('c.id')
+            ->orderBy('c.lastLoginAt', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    // ============================================
+    // RECHERCHE PAR LOCALISATION
+    // ============================================
+
+    /**
+     * Trouve les clients par ville
+     */
+    public function findByCity(string $city, bool $activeOnly = true): array
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->andWhere('c.city = :city')
+            ->setParameter('city', $city)
+            ->orderBy('c.createdAt', 'DESC');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les clients par code postal
+     */
+    public function findByPostalCode(string $postalCode, bool $activeOnly = true): array
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->andWhere('c.postalCode = :postalCode')
+            ->setParameter('postalCode', $postalCode)
+            ->orderBy('c.createdAt', 'DESC');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les clients dans un rayon donné
+     */
+    public function findNearLocation(
+        float $latitude,
+        float $longitude,
+        int $radiusKm = 50,
+        bool $activeOnly = true
+    ): array {
+        $qb = $this->createQueryBuilder('c')
+            ->andWhere('c.latitude IS NOT NULL')
+            ->andWhere('c.longitude IS NOT NULL');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        // Formule de Haversine pour calculer la distance
+        $qb->andWhere(
+            '(6371 * acos(cos(radians(:latitude)) * cos(radians(c.latitude)) * ' .
+            'cos(radians(c.longitude) - radians(:longitude)) + ' .
+            'sin(radians(:latitude)) * sin(radians(c.latitude)))) <= :radius'
+        )
+        ->setParameter('latitude', $latitude)
+        ->setParameter('longitude', $longitude)
+        ->setParameter('radius', $radiusKm)
+        ->orderBy('c.createdAt', 'DESC');
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // RECHERCHE PAR HISTORIQUE D'UTILISATION
+    // ============================================
+
+    /**
+     * Trouve les clients par nombre de demandes
+     */
+    public function findByServiceRequestCount(
+        int $minCount = null,
+        int $maxCount = null,
+        bool $activeOnly = true
+    ): array {
+        $qb = $this->createQueryBuilder('c')
+            ->select('c, COUNT(DISTINCT sr.id) as requestCount')
+            ->leftJoin('c.serviceRequests', 'sr')
+            ->groupBy('c.id');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        if ($minCount !== null) {
+            $qb->having('COUNT(sr.id) >= :minCount')
+               ->setParameter('minCount', $minCount);
+        }
+
+        if ($maxCount !== null) {
+            $qb->having('COUNT(sr.id) <= :maxCount')
+               ->setParameter('maxCount', $maxCount);
+        }
+
+        $qb->orderBy('requestCount', 'DESC');
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les clients par nombre de réservations
+     */
+    public function findByBookingCount(
+        int $minCount = null,
+        int $maxCount = null,
+        bool $activeOnly = true
+    ): array {
+        $qb = $this->createQueryBuilder('c')
+            ->select('c, COUNT(DISTINCT b.id) as bookingCount')
+            ->leftJoin('c.bookings', 'b')
+            ->groupBy('c.id');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        if ($minCount !== null) {
+            $qb->having('COUNT(b.id) >= :minCount')
+               ->setParameter('minCount', $minCount);
+        }
+
+        if ($maxCount !== null) {
+            $qb->having('COUNT(b.id) <= :maxCount')
+               ->setParameter('maxCount', $maxCount);
+        }
+
+        $qb->orderBy('bookingCount', 'DESC');
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les clients les plus actifs
+     */
+    public function findMostActive(int $limit = 20, ?\DateTimeInterface $since = null): array
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->select('c, COUNT(DISTINCT b.id) as bookingCount')
+            ->leftJoin('c.bookings', 'b')
             ->andWhere('c.isActive = :active')
             ->setParameter('active', true)
-            ->orderBy('c.totalBookings', 'DESC')
+            ->groupBy('c.id')
+            ->orderBy('bookingCount', 'DESC')
+            ->setMaxResults($limit);
+
+        if ($since) {
+            $qb->andWhere('b.createdAt >= :since')
+               ->setParameter('since', $since);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les nouveaux clients
+     */
+    public function findNew(int $days = 30, int $limit = 50): array
+    {
+        $date = new \DateTimeImmutable("-{$days} days");
+
+        return $this->createQueryBuilder('c')
+            ->andWhere('c.createdAt >= :date')
+            ->andWhere('c.isActive = :active')
+            ->setParameter('date', $date)
+            ->setParameter('active', true)
+            ->orderBy('c.createdAt', 'DESC')
             ->setMaxResults($limit)
             ->getQuery()
             ->getResult();
     }
 
     /**
-     * Trouve les clients par dépenses totales
+     * Trouve les clients qui n'ont jamais fait de réservation
      */
-    public function findByTotalSpent(string $minAmount): array
+    public function findWithoutBookings(bool $activeOnly = true): array
     {
-        return $this->createQueryBuilder('c')
-            ->andWhere('c.totalSpent >= :minAmount')
-            ->setParameter('minAmount', $minAmount)
-            ->orderBy('c.totalSpent', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Trouve les clients actifs (avec réservations récentes)
-     */
-    public function findActiveClients(\DateTimeInterface $since = null): array
-    {
-        $since = $since ?? (new \DateTime())->modify('-3 months');
-
-        return $this->createQueryBuilder('c')
-            ->innerJoin('c.bookings', 'b')
-            ->andWhere('b.createdAt >= :since')
-            ->andWhere('c.isActive = :active')
-            ->setParameter('since', $since)
-            ->setParameter('active', true)
-            ->groupBy('c.id')
-            ->orderBy('COUNT(b.id)', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Trouve les nouveaux clients
-     */
-    public function findNewClients(int $days = 30): array
-    {
-        $date = (new \DateTime())->modify("-{$days} days");
-
-        return $this->createQueryBuilder('c')
-            ->andWhere('c.createdAt >= :date')
-            ->setParameter('date', $date)
-            ->orderBy('c.createdAt', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Trouve les clients sans réservation
-     */
-    public function findWithoutBookings(): array
-    {
-        return $this->createQueryBuilder('c')
+        $qb = $this->createQueryBuilder('c')
             ->leftJoin('c.bookings', 'b')
-            ->andWhere('b.id IS NULL')
-            ->andWhere('c.isActive = :active')
-            ->setParameter('active', true)
-            ->orderBy('c.createdAt', 'DESC')
+            ->andWhere('b.id IS NULL');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        return $qb->orderBy('c.createdAt', 'DESC')
             ->getQuery()
             ->getResult();
     }
 
     /**
-     * Trouve les clients inactifs (aucune réservation depuis X jours)
+     * Trouve les clients qui n'ont fait qu'une seule réservation
      */
-    public function findInactive(int $days = 90): array
+    public function findOneTimeClients(): array
     {
-        $date = (new \DateTime())->modify("-{$days} days");
-
         return $this->createQueryBuilder('c')
+            ->select('c')
             ->leftJoin('c.bookings', 'b')
             ->andWhere('c.isActive = :active')
-            ->andWhere(
-                '(b.id IS NULL) OR ' .
-                '(SELECT MAX(b2.createdAt) FROM App\Entity\Booking b2 WHERE b2.client = c) < :date'
-            )
             ->setParameter('active', true)
-            ->setParameter('date', $date)
             ->groupBy('c.id')
+            ->having('COUNT(b.id) = 1')
             ->orderBy('c.createdAt', 'DESC')
             ->getQuery()
             ->getResult();
     }
 
+    // ============================================
+    // RECHERCHE PAR CATÉGORIE DE SERVICE
+    // ============================================
+
     /**
-     * Statistiques clients
+     * Trouve les clients par catégorie de service utilisée
      */
-    public function getStatistics(): array
+    public function findByServiceCategory(ServiceCategory $category, bool $activeOnly = true): array
     {
-        $qb = $this->createQueryBuilder('c');
-        
+        $qb = $this->createQueryBuilder('c')
+            ->join('c.serviceRequests', 'sr')
+            ->andWhere('sr.category = :category')
+            ->setParameter('category', $category)
+            ->groupBy('c.id')
+            ->orderBy('c.createdAt', 'DESC');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les clients par sous-catégorie de service
+     */
+    public function findByServiceSubcategory(ServiceSubcategory $subcategory, bool $activeOnly = true): array
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->join('c.serviceRequests', 'sr')
+            ->andWhere('sr.subcategory = :subcategory')
+            ->setParameter('subcategory', $subcategory)
+            ->groupBy('c.id')
+            ->orderBy('c.createdAt', 'DESC');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // RECHERCHE PAR DÉPENSES
+    // ============================================
+
+    /**
+     * Trouve les clients par total dépensé
+     */
+    public function findByTotalSpent(
+        ?float $minAmount = null,
+        ?float $maxAmount = null,
+        bool $activeOnly = true
+    ): array {
+        $qb = $this->createQueryBuilder('c')
+            ->select('c, SUM(p.amount) as totalSpent')
+            ->leftJoin('c.payments', 'p')
+            ->andWhere('p.status = :status')
+            ->setParameter('status', 'completed')
+            ->groupBy('c.id');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        if ($minAmount !== null) {
+            $qb->having('SUM(p.amount) >= :minAmount')
+               ->setParameter('minAmount', $minAmount);
+        }
+
+        if ($maxAmount !== null) {
+            $qb->having('SUM(p.amount) <= :maxAmount')
+               ->setParameter('maxAmount', $maxAmount);
+        }
+
+        $qb->orderBy('totalSpent', 'DESC');
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les meilleurs clients (par montant dépensé)
+     */
+    public function findTopSpenders(int $limit = 20, ?\DateTimeInterface $since = null): array
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->select('c, SUM(p.amount) as totalSpent')
+            ->leftJoin('c.payments', 'p')
+            ->andWhere('c.isActive = :active')
+            ->andWhere('p.status = :status')
+            ->setParameter('active', true)
+            ->setParameter('status', 'completed')
+            ->groupBy('c.id')
+            ->orderBy('totalSpent', 'DESC')
+            ->setMaxResults($limit);
+
+        if ($since) {
+            $qb->andWhere('p.createdAt >= :since')
+               ->setParameter('since', $since);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // RECHERCHE PAR AVIS
+    // ============================================
+
+    /**
+     * Trouve les clients qui ont laissé des avis
+     */
+    public function findWithReviews(bool $activeOnly = true): array
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->join('c.reviews', 'r')
+            ->groupBy('c.id')
+            ->orderBy('c.createdAt', 'DESC');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les clients qui n'ont jamais laissé d'avis
+     */
+    public function findWithoutReviews(bool $activeOnly = true): array
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->leftJoin('c.reviews', 'r')
+            ->leftJoin('c.bookings', 'b')
+            ->andWhere('r.id IS NULL')
+            ->andWhere('b.status = :status')
+            ->setParameter('status', 'completed')
+            ->groupBy('c.id')
+            ->orderBy('c.createdAt', 'DESC');
+
+        if ($activeOnly) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // RECHERCHE AVANCÉE
+    // ============================================
+
+    /**
+     * Recherche de clients par terme
+     */
+    public function search(string $term, int $limit = 20): array
+    {
+        return $this->createQueryBuilder('c')
+            ->andWhere('c.email LIKE :term OR c.firstName LIKE :term OR c.lastName LIKE :term OR c.phone LIKE :term')
+            ->andWhere('c.isActive = :active')
+            ->setParameter('term', '%' . $term . '%')
+            ->setParameter('active', true)
+            ->orderBy('c.lastName', 'ASC')
+            ->addOrderBy('c.firstName', 'ASC')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Recherche avec critères multiples
+     */
+    public function findByCriteria(array $criteria): array
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->orderBy('c.createdAt', 'DESC');
+
+        if (isset($criteria['active'])) {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', $criteria['active']);
+        } else {
+            $qb->andWhere('c.isActive = :active')
+               ->setParameter('active', true);
+        }
+
+        if (isset($criteria['verified'])) {
+            $qb->andWhere('c.isVerified = :verified')
+               ->setParameter('verified', $criteria['verified']);
+        }
+
+        if (isset($criteria['email'])) {
+            $qb->andWhere('c.email LIKE :email')
+               ->setParameter('email', '%' . $criteria['email'] . '%');
+        }
+
+        if (isset($criteria['firstName'])) {
+            $qb->andWhere('c.firstName LIKE :firstName')
+               ->setParameter('firstName', '%' . $criteria['firstName'] . '%');
+        }
+
+        if (isset($criteria['lastName'])) {
+            $qb->andWhere('c.lastName LIKE :lastName')
+               ->setParameter('lastName', '%' . $criteria['lastName'] . '%');
+        }
+
+        if (isset($criteria['phone'])) {
+            $qb->andWhere('c.phone LIKE :phone')
+               ->setParameter('phone', '%' . $criteria['phone'] . '%');
+        }
+
+        if (isset($criteria['city'])) {
+            $qb->andWhere('c.city = :city')
+               ->setParameter('city', $criteria['city']);
+        }
+
+        if (isset($criteria['postal_code'])) {
+            $qb->andWhere('c.postalCode = :postalCode')
+               ->setParameter('postalCode', $criteria['postal_code']);
+        }
+
+        if (isset($criteria['has_bookings'])) {
+            if ($criteria['has_bookings']) {
+                $qb->join('c.bookings', 'b');
+            } else {
+                $qb->leftJoin('c.bookings', 'b')
+                   ->andWhere('b.id IS NULL');
+            }
+        }
+
+        if (isset($criteria['has_reviews'])) {
+            if ($criteria['has_reviews']) {
+                $qb->join('c.reviews', 'r');
+            } else {
+                $qb->leftJoin('c.reviews', 'r')
+                   ->andWhere('r.id IS NULL');
+            }
+        }
+
+        if (isset($criteria['created_after'])) {
+            $qb->andWhere('c.createdAt >= :createdAfter')
+               ->setParameter('createdAfter', $criteria['created_after']);
+        }
+
+        if (isset($criteria['created_before'])) {
+            $qb->andWhere('c.createdAt <= :createdBefore')
+               ->setParameter('createdBefore', $criteria['created_before']);
+        }
+
+        if (isset($criteria['last_login_after'])) {
+            $qb->andWhere('c.lastLoginAt >= :lastLoginAfter')
+               ->setParameter('lastLoginAfter', $criteria['last_login_after']);
+        }
+
+        if (!empty($criteria['search'])) {
+            $qb->andWhere('c.email LIKE :search OR c.firstName LIKE :search OR c.lastName LIKE :search OR c.phone LIKE :search')
+               ->setParameter('search', '%' . $criteria['search'] . '%');
+        }
+
+        if (isset($criteria['limit'])) {
+            $qb->setMaxResults($criteria['limit']);
+        }
+
+        if (isset($criteria['offset'])) {
+            $qb->setFirstResult($criteria['offset']);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // VÉRIFICATIONS
+    // ============================================
+
+    /**
+     * Vérifie si un email existe déjà
+     */
+    public function emailExists(string $email, ?int $excludeClientId = null): bool
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->andWhere('c.email = :email')
+            ->setParameter('email', $email);
+
+        if ($excludeClientId !== null) {
+            $qb->andWhere('c.id != :clientId')
+               ->setParameter('clientId', $excludeClientId);
+        }
+
+        return (int) $qb->getQuery()->getSingleScalarResult() > 0;
+    }
+
+    /**
+     * Vérifie si un téléphone existe déjà
+     */
+    public function phoneExists(string $phone, ?int $excludeClientId = null): bool
+    {
+        $qb = $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->andWhere('c.phone = :phone')
+            ->setParameter('phone', $phone);
+
+        if ($excludeClientId !== null) {
+            $qb->andWhere('c.id != :clientId')
+               ->setParameter('clientId', $excludeClientId);
+        }
+
+        return (int) $qb->getQuery()->getSingleScalarResult() > 0;
+    }
+
+    // ============================================
+    // STATISTIQUES
+    // ============================================
+
+    /**
+     * Compte le nombre total de clients
+     */
+    public function countAll(): int
+    {
+        return (int) $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    /**
+     * Compte les clients actifs
+     */
+    public function countActive(): int
+    {
+        return (int) $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->andWhere('c.isActive = :active')
+            ->setParameter('active', true)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    /**
+     * Compte les clients vérifiés
+     */
+    public function countVerified(): int
+    {
+        return (int) $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->andWhere('c.isVerified = :verified')
+            ->setParameter('verified', true)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    /**
+     * Compte les clients par ville
+     */
+    public function countByCity(): array
+    {
+        return $this->createQueryBuilder('c')
+            ->select('c.city, COUNT(c.id) as count')
+            ->andWhere('c.isActive = :active')
+            ->andWhere('c.city IS NOT NULL')
+            ->setParameter('active', true)
+            ->groupBy('c.city')
+            ->orderBy('count', 'DESC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Statistiques des nouvelles inscriptions
+     */
+    public function getRegistrationStats(int $days = 30): array
+    {
+        $startDate = new \DateTimeImmutable("-{$days} days");
+
+        $total = (int) $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->andWhere('c.createdAt >= :startDate')
+            ->setParameter('startDate', $startDate)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $verified = (int) $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->andWhere('c.createdAt >= :startDate')
+            ->andWhere('c.isVerified = :verified')
+            ->setParameter('startDate', $startDate)
+            ->setParameter('verified', true)
+            ->getQuery()
+            ->getSingleScalarResult();
+
         return [
-            'total' => $qb->select('COUNT(c.id)')
-                ->getQuery()
-                ->getSingleScalarResult(),
-            
-            'active' => $qb->select('COUNT(c.id)')
-                ->andWhere('c.isActive = :active')
-                ->setParameter('active', true)
-                ->getQuery()
-                ->getSingleScalarResult(),
-            
-            'verified' => $qb->select('COUNT(c.id)')
-                ->andWhere('c.isVerified = :verified')
-                ->setParameter('verified', true)
-                ->getQuery()
-                ->getSingleScalarResult(),
-            
-            'with_bookings' => $qb->select('COUNT(DISTINCT c.id)')
-                ->innerJoin('c.bookings', 'b')
-                ->getQuery()
-                ->getSingleScalarResult(),
-            
-            'without_bookings' => $qb->select('COUNT(c.id)')
-                ->leftJoin('c.bookings', 'b')
-                ->andWhere('b.id IS NULL')
-                ->getQuery()
-                ->getSingleScalarResult(),
-            
-            'total_spent' => $qb->select('SUM(c.totalSpent)')
-                ->getQuery()
-                ->getSingleScalarResult() ?? '0.00',
-            
-            'average_spent' => $qb->select('AVG(c.totalSpent)')
-                ->andWhere('c.totalBookings > 0')
-                ->getQuery()
-                ->getSingleScalarResult() ?? '0.00',
-
-            'total_bookings' => $qb->select('SUM(c.totalBookings)')
-                ->getQuery()
-                ->getSingleScalarResult() ?? 0,
-
-            'average_bookings' => $qb->select('AVG(c.totalBookings)')
-                ->getQuery()
-                ->getSingleScalarResult() ?? 0,
+            'period_days' => $days,
+            'total' => $total,
+            'verified' => $verified,
+            'verification_rate' => $total > 0 ? round(($verified / $total) * 100, 2) : 0,
+            'average_per_day' => round($total / $days, 2),
         ];
     }
 
     /**
-     * Clients par ville
+     * Statistiques globales des clients
      */
-    public function findByCity(string $city): array
+    public function getGlobalStats(): array
     {
-        return $this->createQueryBuilder('c')
-            ->andWhere('c.city LIKE :city')
+        $total = $this->countAll();
+        $active = $this->countActive();
+        $verified = $this->countVerified();
+
+        $withBookings = (int) $this->createQueryBuilder('c')
+            ->select('COUNT(DISTINCT c.id)')
+            ->join('c.bookings', 'b')
             ->andWhere('c.isActive = :active')
-            ->setParameter('city', '%' . $city . '%')
             ->setParameter('active', true)
-            ->orderBy('c.lastName', 'ASC')
             ->getQuery()
-            ->getResult();
-    }
+            ->getSingleScalarResult();
 
-    /**
-     * Répartition géographique des clients
-     */
-    public function getGeographicDistribution(): array
-    {
-        return $this->createQueryBuilder('c')
-            ->select('c.city, c.postalCode, COUNT(c.id) as count')
-            ->andWhere('c.city IS NOT NULL')
-            ->groupBy('c.city', 'c.postalCode')
-            ->orderBy('count', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Clients par méthode de paiement préférée
-     */
-    public function getPaymentMethodDistribution(): array
-    {
-        return $this->createQueryBuilder('c')
-            ->select('c.preferredPaymentMethod, COUNT(c.id) as count')
-            ->andWhere('c.preferredPaymentMethod IS NOT NULL')
-            ->groupBy('c.preferredPaymentMethod')
-            ->orderBy('count', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Clients VIP (dépenses élevées et beaucoup de réservations)
-     */
-    public function findVIPClients(
-        string $minSpent = '500.00',
-        int $minBookings = 5
-    ): array {
-        return $this->createQueryBuilder('c')
-            ->andWhere('c.totalSpent >= :minSpent')
-            ->andWhere('c.totalBookings >= :minBookings')
+        $withReviews = (int) $this->createQueryBuilder('c')
+            ->select('COUNT(DISTINCT c.id)')
+            ->join('c.reviews', 'r')
             ->andWhere('c.isActive = :active')
-            ->setParameter('minSpent', $minSpent)
-            ->setParameter('minBookings', $minBookings)
             ->setParameter('active', true)
-            ->orderBy('c.totalSpent', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Taux de rétention (clients avec au moins 2 réservations)
-     */
-    public function getRetentionRate(): float
-    {
-        $total = $this->createQueryBuilder('c')
-            ->select('COUNT(c.id)')
             ->getQuery()
             ->getSingleScalarResult();
 
-        if ($total === 0) {
-            return 0;
-        }
-
-        $retained = $this->createQueryBuilder('c')
-            ->select('COUNT(c.id)')
-            ->andWhere('c.totalBookings >= :minBookings')
-            ->setParameter('minBookings', 2)
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        return round(($retained / $total) * 100, 2);
-    }
-
-    /**
-     * Valeur vie client moyenne (Customer Lifetime Value)
-     */
-    public function getAverageLifetimeValue(): string
-    {
-        $result = $this->createQueryBuilder('c')
-            ->select('AVG(c.totalSpent)')
-            ->andWhere('c.totalBookings > 0')
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        return $result ?? '0.00';
-    }
-
-    /**
-     * Clients par tranche de dépenses
-     */
-    public function getSpendingDistribution(): array
-    {
-        $conn = $this->getEntityManager()->getConnection();
-        
-        $sql = '
-            SELECT 
-                CASE 
-                    WHEN total_spent = 0 THEN "0€"
-                    WHEN total_spent < 100 THEN "0-100€"
-                    WHEN total_spent < 500 THEN "100-500€"
-                    WHEN total_spent < 1000 THEN "500-1000€"
-                    ELSE "1000€+"
-                END as spending_range,
-                COUNT(*) as count
-            FROM clients
-            GROUP BY spending_range
-            ORDER BY 
-                CASE spending_range
-                    WHEN "0€" THEN 1
-                    WHEN "0-100€" THEN 2
-                    WHEN "100-500€" THEN 3
-                    WHEN "500-1000€" THEN 4
-                    WHEN "1000€+" THEN 5
-                END
-        ';
-
-        $stmt = $conn->prepare($sql);
-        $result = $stmt->executeQuery();
-
-        return $result->fetchAllAssociative();
-    }
-
-    /**
-     * Croissance mensuelle des nouveaux clients
-     */
-    public function getMonthlyGrowth(int $year): array
-    {
-        return $this->createQueryBuilder('c')
-            ->select('MONTH(c.createdAt) as month, COUNT(c.id) as count')
-            ->andWhere('YEAR(c.createdAt) = :year')
-            ->setParameter('year', $year)
-            ->groupBy('month')
-            ->orderBy('month', 'ASC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Recherche de clients
-     */
-    public function search(string $searchTerm): array
-    {
-        return $this->createQueryBuilder('c')
-            ->andWhere(
-                'c.firstName LIKE :term OR ' .
-                'c.lastName LIKE :term OR ' .
-                'c.email LIKE :term OR ' .
-                'c.phone LIKE :term OR ' .
-                'c.city LIKE :term'
-            )
-            ->setParameter('term', '%' . $searchTerm . '%')
-            ->orderBy('c.lastName', 'ASC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Clients avec des réservations non évaluées
-     */
-    public function findWithPendingReviews(): array
-    {
-        return $this->createQueryBuilder('c')
-            ->innerJoin('c.bookings', 'b')
-            ->leftJoin('b.review', 'r')
-            ->andWhere('b.status = :status')
-            ->andWhere('r.id IS NULL')
-            ->setParameter('status', 'completed')
+        $avgBookingsPerClient = $this->createQueryBuilder('c')
+            ->select('AVG(bookingCount)')
+            ->join('c.bookings', 'b')
+            ->andWhere('c.isActive = :active')
+            ->setParameter('active', true)
             ->groupBy('c.id')
-            ->orderBy('MAX(b.completedAt)', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Exporte les clients en CSV
-     */
-    public function exportToCsv(array $clients): string
-    {
-        $handle = fopen('php://temp', 'r+');
-        
-        // En-têtes
-        fputcsv($handle, [
-            'ID',
-            'Email',
-            'Prénom',
-            'Nom',
-            'Téléphone',
-            'Ville',
-            'Total Réservations',
-            'Total Dépensé (€)',
-            'Méthode Paiement Préférée',
-            'Inscrit le',
-            'Dernière Connexion'
-        ]);
-
-        // Données
-        foreach ($clients as $client) {
-            fputcsv($handle, [
-                $client->getId(),
-                $client->getEmail(),
-                $client->getFirstName(),
-                $client->getLastName(),
-                $client->getPhone(),
-                $client->getCity(),
-                $client->getTotalBookings(),
-                $client->getTotalSpent(),
-                $client->getPreferredPaymentMethod() ?? 'Non défini',
-                $client->getCreatedAt()->format('d/m/Y'),
-                $client->getLastLoginAt() ? $client->getLastLoginAt()->format('d/m/Y H:i') : 'Jamais'
-            ]);
-        }
-
-        rewind($handle);
-        $csv = stream_get_contents($handle);
-        fclose($handle);
-
-        return $csv;
-    }
-
-    /**
-     * Clients à risque de désabonnement (churn)
-     */
-    public function findAtRiskOfChurn(int $inactiveDays = 60): array
-    {
-        $date = (new \DateTime())->modify("-{$inactiveDays} days");
-
-        return $this->createQueryBuilder('c')
-            ->leftJoin('c.bookings', 'b')
-            ->andWhere('c.isActive = :active')
-            ->andWhere('c.totalBookings > 0')
-            ->andWhere(
-                '(SELECT MAX(b2.createdAt) FROM App\Entity\Booking b2 WHERE b2.client = c) < :date'
-            )
-            ->setParameter('active', true)
-            ->setParameter('date', $date)
-            ->groupBy('c.id')
-            ->orderBy('c.totalSpent', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Panier moyen par client
-     */
-    public function getAverageBasket(): string
-    {
-        $result = $this->createQueryBuilder('c')
-            ->select('AVG(c.totalSpent / NULLIF(c.totalBookings, 0))')
-            ->andWhere('c.totalBookings > 0')
+            ->having('COUNT(b.id) > 0')
             ->getQuery()
             ->getSingleScalarResult();
 
-        return $result ?? '0.00';
+        $recentRegistrations = $this->getRegistrationStats(30);
+
+        return [
+            'total_clients' => $total,
+            'active_clients' => $active,
+            'verified_clients' => $verified,
+            'clients_with_bookings' => $withBookings,
+            'clients_with_reviews' => $withReviews,
+            'average_bookings_per_client' => $avgBookingsPerClient ? round((float) $avgBookingsPerClient, 2) : 0,
+            'conversion_rate' => $total > 0 ? round(($withBookings / $total) * 100, 2) : 0,
+            'new_clients_last_30_days' => $recentRegistrations['total'],
+        ];
     }
 
+    // ============================================
+    // OPÉRATIONS DE MASSE
+    // ============================================
+
     /**
-     * Segmentation RFM (Recency, Frequency, Monetary)
+     * Active ou désactive plusieurs clients
      */
-    public function getRFMSegmentation(): array
+    public function toggleActiveStatus(array $clientIds, bool $isActive): int
     {
-        // Cette méthode nécessiterait une logique plus complexe pour calculer les scores RFM de chaque client
-        $clients = $this->findAllActive();
-        $segments = [];
+        return $this->createQueryBuilder('c')
+            ->update()
+            ->set('c.isActive', ':active')
+            ->set('c.updatedAt', ':now')
+            ->where('c.id IN (:ids)')
+            ->setParameter('active', $isActive)
+            ->setParameter('now', new \DateTimeImmutable())
+            ->setParameter('ids', $clientIds)
+            ->getQuery()
+            ->execute();
+    }
 
-        foreach ($clients as $client) {
-            $lastBooking = $client->getLastBookingDate();
-            $recency = $lastBooking 
-                ? (new \DateTime())->diff($lastBooking)->days 
-                : 999;
-            
-            $frequency = $client->getTotalBookings();
-            $monetary = (float)$client->getTotalSpent();
+    // ============================================
+    // PERSISTENCE
+    // ============================================
 
-            // Scoring simple (à affiner selon les besoins)
-            $recencyScore = $recency < 30 ? 5 : ($recency < 90 ? 3 : 1);
-            $frequencyScore = $frequency > 10 ? 5 : ($frequency > 5 ? 3 : 1);
-            $monetaryScore = $monetary > 1000 ? 5 : ($monetary > 500 ? 3 : 1);
+    public function save(Client $entity, bool $flush = false): void
+    {
+        $this->getEntityManager()->persist($entity);
 
-            $totalScore = $recencyScore + $frequencyScore + $monetaryScore;
-
-            $segment = match(true) {
-                $totalScore >= 13 => 'Champions',
-                $totalScore >= 10 => 'Loyaux',
-                $totalScore >= 7 => 'Potentiels',
-                $totalScore >= 4 => 'À risque',
-                default => 'Perdus'
-            };
-
-            if (!isset($segments[$segment])) {
-                $segments[$segment] = 0;
-            }
-            $segments[$segment]++;
+        if ($flush) {
+            $this->getEntityManager()->flush();
         }
+    }
 
-        return $segments;
+    public function remove(Client $entity, bool $flush = false): void
+    {
+        $this->getEntityManager()->remove($entity);
+
+        if ($flush) {
+            $this->getEntityManager()->flush();
+        }
     }
 }

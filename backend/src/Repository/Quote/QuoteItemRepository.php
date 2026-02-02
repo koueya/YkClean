@@ -1,11 +1,11 @@
 <?php
-// src/Repository/QuoteItemRepository.php
+// src/Repository/Quote/QuoteItemRepository.php
 
 namespace App\Repository\Quote;
 
-use App\Entity\QuoteItem;
-use App\Entity\Quote;
-use App\Entity\ServiceType;
+use App\Entity\Quote\QuoteItem;
+use App\Entity\Quote\Quote;
+use App\Entity\Service\ServiceSubcategory;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 
@@ -19,8 +19,12 @@ class QuoteItemRepository extends ServiceEntityRepository
         parent::__construct($registry, QuoteItem::class);
     }
 
+    // ============================================
+    // RECHERCHE PAR DEVIS
+    // ============================================
+
     /**
-     * Trouve les items d'un devis
+     * Trouve tous les items d'un devis
      */
     public function findByQuote(Quote $quote): array
     {
@@ -62,21 +66,29 @@ class QuoteItemRepository extends ServiceEntityRepository
             ->getResult();
     }
 
+    // ============================================
+    // RECHERCHE PAR SOUS-CATÉGORIE
+    // ============================================
+
     /**
-     * Trouve les items par type de service
+     * Trouve les items par sous-catégorie de service
      */
-    public function findByServiceType(ServiceType $serviceType): array
+    public function findBySubcategory(ServiceSubcategory $subcategory): array
     {
         return $this->createQueryBuilder('qi')
-            ->andWhere('qi.serviceType = :serviceType')
-            ->setParameter('serviceType', $serviceType)
+            ->andWhere('qi.subcategory = :subcategory')
+            ->setParameter('subcategory', $subcategory)
             ->orderBy('qi.createdAt', 'DESC')
             ->getQuery()
             ->getResult();
     }
 
+    // ============================================
+    // CALCULS ET STATISTIQUES
+    // ============================================
+
     /**
-     * Calcule le total d'un devis
+     * Calcule le total d'un devis (items obligatoires uniquement)
      */
     public function calculateQuoteTotal(Quote $quote, bool $includeOptional = false): string
     {
@@ -90,13 +102,15 @@ class QuoteItemRepository extends ServiceEntityRepository
                ->setParameter('optional', false);
         }
 
-        return $qb->getQuery()->getSingleScalarResult() ?? '0.00';
+        $result = $qb->getQuery()->getSingleScalarResult();
+        
+        return $result !== null ? (string) round((float) $result, 2) : '0.00';
     }
 
     /**
-     * Calcule la durée totale d'un devis
+     * Calcule la durée totale estimée d'un devis
      */
-    public function calculateQuoteDuration(Quote $quote, bool $includeOptional = false): int
+    public function calculateTotalDuration(Quote $quote, bool $includeOptional = false): int
     {
         $qb = $this->createQueryBuilder('qi')
             ->select('SUM(qi.estimatedDuration * qi.quantity)')
@@ -109,178 +123,192 @@ class QuoteItemRepository extends ServiceEntityRepository
                ->setParameter('optional', false);
         }
 
-        return (int)($qb->getQuery()->getSingleScalarResult() ?? 0);
+        $result = $qb->getQuery()->getSingleScalarResult();
+        
+        return $result !== null ? (int) $result : 0;
     }
 
     /**
-     * Compte les items d'un devis
+     * Compte le nombre d'items dans un devis
      */
-    public function countByQuote(Quote $quote, ?bool $optionalOnly = null): int
+    public function countByQuote(Quote $quote, ?bool $isOptional = null): int
     {
         $qb = $this->createQueryBuilder('qi')
             ->select('COUNT(qi.id)')
             ->andWhere('qi.quote = :quote')
             ->setParameter('quote', $quote);
 
-        if ($optionalOnly !== null) {
+        if ($isOptional !== null) {
             $qb->andWhere('qi.isOptional = :optional')
-               ->setParameter('optional', $optionalOnly);
+               ->setParameter('optional', $isOptional);
         }
 
-        return $qb->getQuery()->getSingleScalarResult();
+        return (int) $qb->getQuery()->getSingleScalarResult();
+    }
+
+    // ============================================
+    // MÉTHODES UTILITAIRES
+    // ============================================
+
+    /**
+     * Trouve le dernier ordre d'affichage pour un devis
+     */
+    public function findMaxDisplayOrder(Quote $quote): int
+    {
+        $result = $this->createQueryBuilder('qi')
+            ->select('MAX(qi.displayOrder)')
+            ->andWhere('qi.quote = :quote')
+            ->setParameter('quote', $quote)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return $result !== null ? (int) $result : 0;
     }
 
     /**
-     * Trouve les items avec options
+     * Trouve un item par sa référence interne
      */
-    public function findWithOptions(): array
+    public function findByInternalReference(Quote $quote, string $reference): ?QuoteItem
     {
         return $this->createQueryBuilder('qi')
-            ->andWhere('qi.options IS NOT NULL')
-            ->orderBy('qi.createdAt', 'DESC')
+            ->andWhere('qi.quote = :quote')
+            ->andWhere('qi.internalReference = :reference')
+            ->setParameter('quote', $quote)
+            ->setParameter('reference', $reference)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
+    /**
+     * Trouve les items avec un prix unitaire dans une fourchette
+     */
+    public function findByPriceRange(Quote $quote, float $minPrice, float $maxPrice): array
+    {
+        return $this->createQueryBuilder('qi')
+            ->andWhere('qi.quote = :quote')
+            ->andWhere('CAST(qi.unitPrice AS DECIMAL(10,2)) >= :minPrice')
+            ->andWhere('CAST(qi.unitPrice AS DECIMAL(10,2)) <= :maxPrice')
+            ->setParameter('quote', $quote)
+            ->setParameter('minPrice', $minPrice)
+            ->setParameter('maxPrice', $maxPrice)
+            ->orderBy('qi.unitPrice', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    // ============================================
+    // OPÉRATIONS DE MASSE
+    // ============================================
+
+    /**
+     * Réorganise l'ordre d'affichage des items
+     */
+    public function reorderItems(Quote $quote, array $itemIdsOrdered): void
+    {
+        $position = 1;
+        foreach ($itemIdsOrdered as $itemId) {
+            $this->createQueryBuilder('qi')
+                ->update()
+                ->set('qi.displayOrder', ':order')
+                ->andWhere('qi.id = :id')
+                ->andWhere('qi.quote = :quote')
+                ->setParameter('order', $position)
+                ->setParameter('id', $itemId)
+                ->setParameter('quote', $quote)
+                ->getQuery()
+                ->execute();
+            
+            $position++;
+        }
+    }
+
+    /**
+     * Supprime tous les items optionnels d'un devis
+     */
+    public function deleteOptionalItems(Quote $quote): int
+    {
+        return $this->createQueryBuilder('qi')
+            ->delete()
+            ->andWhere('qi.quote = :quote')
+            ->andWhere('qi.isOptional = :optional')
+            ->setParameter('quote', $quote)
+            ->setParameter('optional', true)
+            ->getQuery()
+            ->execute();
+    }
+
+    // ============================================
+    // STATISTIQUES AVANCÉES
+    // ============================================
+
+    /**
+     * Retourne le détail des montants par sous-catégorie
+     */
+    public function getAmountsBySubcategory(Quote $quote): array
+    {
+        return $this->createQueryBuilder('qi')
+            ->select('s.name as subcategoryName, SUM(qi.totalPrice) as total')
+            ->leftJoin('qi.subcategory', 's')
+            ->andWhere('qi.quote = :quote')
+            ->andWhere('qi.isOptional = :optional')
+            ->setParameter('quote', $quote)
+            ->setParameter('optional', false)
+            ->groupBy('s.id')
+            ->orderBy('total', 'DESC')
             ->getQuery()
             ->getResult();
     }
 
     /**
-     * Statistiques des items de devis
+     * Retourne les items avec le prix total le plus élevé
      */
-    public function getItemStatistics(): array
-    {
-        $qb = $this->createQueryBuilder('qi');
-
-        return [
-            'total_items' => $qb->select('COUNT(qi.id)')
-                ->getQuery()
-                ->getSingleScalarResult(),
-
-            'mandatory_items' => $qb->select('COUNT(qi.id)')
-                ->andWhere('qi.isOptional = :optional')
-                ->setParameter('optional', false)
-                ->getQuery()
-                ->getSingleScalarResult(),
-
-            'optional_items' => $qb->select('COUNT(qi.id)')
-                ->andWhere('qi.isOptional = :optional')
-                ->setParameter('optional', true)
-                ->getQuery()
-                ->getSingleScalarResult(),
-
-            'average_unit_price' => $qb->select('AVG(qi.unitPrice)')
-                ->getQuery()
-                ->getSingleScalarResult() ?? '0.00',
-
-            'average_total_price' => $qb->select('AVG(qi.totalPrice)')
-                ->getQuery()
-                ->getSingleScalarResult() ?? '0.00',
-
-            'average_quantity' => $qb->select('AVG(qi.quantity)')
-                ->getQuery()
-                ->getSingleScalarResult() ?? 0,
-
-            'total_value' => $qb->select('SUM(qi.totalPrice)')
-                ->getQuery()
-                ->getSingleScalarResult() ?? '0.00',
-        ];
-    }
-
-    /**
-     * Items les plus utilisés
-     */
-    public function findMostUsedItems(int $limit = 10): array
+    public function findMostExpensiveItems(Quote $quote, int $limit = 5): array
     {
         return $this->createQueryBuilder('qi')
-            ->select('qi.description, COUNT(qi.id) as usage_count, AVG(qi.unitPrice) as avg_price')
-            ->groupBy('qi.description')
-            ->orderBy('usage_count', 'DESC')
+            ->andWhere('qi.quote = :quote')
+            ->setParameter('quote', $quote)
+            ->orderBy('CAST(qi.totalPrice AS DECIMAL(10,2))', 'DESC')
             ->setMaxResults($limit)
             ->getQuery()
             ->getResult();
     }
 
     /**
-     * Items par plage de prix
+     * Vérifie si un devis contient des items optionnels
      */
-    public function findByPriceRange(string $minPrice, string $maxPrice): array
+    public function hasOptionalItems(Quote $quote): bool
     {
-        return $this->createQueryBuilder('qi')
-            ->andWhere('qi.totalPrice >= :minPrice')
-            ->andWhere('qi.totalPrice <= :maxPrice')
-            ->setParameter('minPrice', $minPrice)
-            ->setParameter('maxPrice', $maxPrice)
-            ->orderBy('qi.totalPrice', 'ASC')
+        $count = $this->createQueryBuilder('qi')
+            ->select('COUNT(qi.id)')
+            ->andWhere('qi.quote = :quote')
+            ->andWhere('qi.isOptional = :optional')
+            ->setParameter('quote', $quote)
+            ->setParameter('optional', true)
             ->getQuery()
-            ->getResult();
+            ->getSingleScalarResult();
+
+        return $count > 0;
     }
 
-    /**
-     * Prix moyen par type de service
-     */
-    public function getAveragePriceByServiceType(): array
+    // ============================================
+    // PERSISTENCE
+    // ============================================
+
+    public function save(QuoteItem $entity, bool $flush = false): void
     {
-        return $this->createQueryBuilder('qi')
-            ->select('st.name as service_name, AVG(qi.unitPrice) as avg_price, COUNT(qi.id) as count')
-            ->innerJoin('qi.serviceType', 'st')
-            ->groupBy('st.id')
-            ->orderBy('avg_price', 'DESC')
-            ->getQuery()
-            ->getResult();
+        $this->getEntityManager()->persist($entity);
+
+        if ($flush) {
+            $this->getEntityManager()->flush();
+        }
     }
 
-    /**
-     * Trouve les items avec des durées estimées longues
-     */
-    public function findLongDurationItems(int $minDuration): array
+    public function remove(QuoteItem $entity, bool $flush = false): void
     {
-        return $this->createQueryBuilder('qi')
-            ->andWhere('qi.estimatedDuration >= :minDuration')
-            ->setParameter('minDuration', $minDuration)
-            ->orderBy('qi.estimatedDuration', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
+        $this->getEntityManager()->remove($entity);
 
-    /**
-     * Répartition des quantités
-     */
-    public function getQuantityDistribution(): array
-    {
-        return $this->createQueryBuilder('qi')
-            ->select('qi.quantity, COUNT(qi.id) as count')
-            ->groupBy('qi.quantity')
-            ->orderBy('qi.quantity', 'ASC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Items créés dans une période
-     */
-    public function findCreatedBetween(
-        \DateTimeInterface $startDate,
-        \DateTimeInterface $endDate
-    ): array {
-        return $this->createQueryBuilder('qi')
-            ->andWhere('qi.createdAt >= :startDate')
-            ->andWhere('qi.createdAt <= :endDate')
-            ->setParameter('startDate', $startDate)
-            ->setParameter('endDate', $endDate)
-            ->orderBy('qi.createdAt', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Somme des prix par unité
-     */
-    public function getTotalPriceByUnit(): array
-    {
-        return $this->createQueryBuilder('qi')
-            ->select('qi.unit, SUM(qi.totalPrice) as total, COUNT(qi.id) as count')
-            ->andWhere('qi.unit IS NOT NULL')
-            ->groupBy('qi.unit')
-            ->orderBy('total', 'DESC')
-            ->getQuery()
-            ->getResult();
+        if ($flush) {
+            $this->getEntityManager()->flush();
+        }
     }
 }

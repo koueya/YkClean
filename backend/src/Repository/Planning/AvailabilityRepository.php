@@ -1,14 +1,18 @@
 <?php
-// src/Repository/AvailabilityRepository.php
+// src/Repository/Planning/AvailabilityRepository.php
 
 namespace App\Repository\Planning;
 
 use App\Entity\Planning\Availability;
 use App\Entity\User\Prestataire;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\ORM\QueryBuilder;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
+ * Repository pour l'entité Availability
+ * Gère toutes les requêtes liées aux disponibilités des prestataires
+ * 
  * @extends ServiceEntityRepository<Availability>
  */
 class AvailabilityRepository extends ServiceEntityRepository
@@ -19,33 +23,160 @@ class AvailabilityRepository extends ServiceEntityRepository
     }
 
     /**
+     * Persiste une disponibilité
+     */
+    public function save(Availability $availability, bool $flush = false): void
+    {
+        $this->getEntityManager()->persist($availability);
+
+        if ($flush) {
+            $this->getEntityManager()->flush();
+        }
+    }
+
+    /**
+     * Supprime une disponibilité
+     */
+    public function remove(Availability $availability, bool $flush = false): void
+    {
+        $this->getEntityManager()->remove($availability);
+
+        if ($flush) {
+            $this->getEntityManager()->flush();
+        }
+    }
+
+    // ============================================
+    // RECHERCHE PAR PRESTATAIRE
+    // ============================================
+
+    /**
      * Trouve toutes les disponibilités d'un prestataire
      */
-    public function findByPrestataire(Prestataire $prestataire): array
-    {
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
+    public function findByPrestataire(
+        Prestataire $prestataire,
+        ?bool $isRecurring = null,
+        ?bool $isActive = null
+    ): array {
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.prestataire = :prestataire')
             ->setParameter('prestataire', $prestataire)
             ->orderBy('a.dayOfWeek', 'ASC')
+            ->addOrderBy('a.startTime', 'ASC');
+
+        if ($isRecurring !== null) {
+            $qb->andWhere('a.isRecurring = :isRecurring')
+               ->setParameter('isRecurring', $isRecurring);
+        }
+
+        if ($isActive !== null) {
+            $qb->andWhere('a.isActive = :isActive')
+               ->setParameter('isActive', $isActive);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les disponibilités récurrentes d'un prestataire
+     */
+    public function findRecurringByPrestataire(Prestataire $prestataire): array
+    {
+        return $this->findByPrestataire($prestataire, true, true);
+    }
+
+    /**
+     * Trouve les disponibilités ponctuelles d'un prestataire
+     */
+    public function findSpecificByPrestataire(Prestataire $prestataire): array
+    {
+        return $this->createQueryBuilder('a')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.isRecurring = false')
+            ->andWhere('a.specificDate IS NOT NULL')
+            ->andWhere('a.isActive = true')
+            ->setParameter('prestataire', $prestataire)
+            ->orderBy('a.specificDate', 'ASC')
             ->addOrderBy('a.startTime', 'ASC')
             ->getQuery()
             ->getResult();
     }
 
     /**
-     * Trouve les disponibilités d'un prestataire pour un jour spécifique
+     * Compte les disponibilités d'un prestataire
      */
-    public function findByPrestataireAndDay(Prestataire $prestataire, int $dayOfWeek): array
+    public function countByPrestataire(Prestataire $prestataire): int
     {
+        return (int) $this->createQueryBuilder('a')
+            ->select('COUNT(a.id)')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.isActive = true')
+            ->setParameter('prestataire', $prestataire)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    // ============================================
+    // RECHERCHE PAR JOUR
+    // ============================================
+
+    /**
+     * Trouve les disponibilités d'un prestataire pour un jour spécifique de la semaine
+     */
+    public function findByPrestataireAndDay(
+        Prestataire $prestataire, 
+        int $dayOfWeek
+    ): array {
         return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
+            ->where('a.prestataire = :prestataire')
             ->andWhere('a.dayOfWeek = :dayOfWeek')
+            ->andWhere('a.isActive = true')
             ->setParameter('prestataire', $prestataire)
             ->setParameter('dayOfWeek', $dayOfWeek)
             ->orderBy('a.startTime', 'ASC')
             ->getQuery()
             ->getResult();
     }
+
+    /**
+     * Trouve toutes les disponibilités pour un jour de la semaine (tous prestataires)
+     */
+    public function findByDayOfWeek(int $dayOfWeek): array
+    {
+        return $this->createQueryBuilder('a')
+            ->where('a.dayOfWeek = :dayOfWeek')
+            ->andWhere('a.isActive = true')
+            ->andWhere('a.isRecurring = true')
+            ->setParameter('dayOfWeek', $dayOfWeek)
+            ->orderBy('a.startTime', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Trouve les disponibilités pour une date spécifique
+     */
+    public function findBySpecificDate(
+        \DateTimeInterface $date,
+        ?Prestataire $prestataire = null
+    ): array {
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.specificDate = :date')
+            ->andWhere('a.isActive = true')
+            ->setParameter('date', $date)
+            ->orderBy('a.startTime', 'ASC');
+
+        if ($prestataire) {
+            $qb->andWhere('a.prestataire = :prestataire')
+               ->setParameter('prestataire', $prestataire);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // VÉRIFICATION DE DISPONIBILITÉ
+    // ============================================
 
     /**
      * Vérifie si un prestataire est disponible à un jour et heure donnés
@@ -59,10 +190,11 @@ class AvailabilityRepository extends ServiceEntityRepository
 
         $count = $this->createQueryBuilder('a')
             ->select('COUNT(a.id)')
-            ->andWhere('a.prestataire = :prestataire')
+            ->where('a.prestataire = :prestataire')
             ->andWhere('a.dayOfWeek = :dayOfWeek')
             ->andWhere('a.startTime <= :time')
             ->andWhere('a.endTime > :time')
+            ->andWhere('a.isActive = true')
             ->setParameter('prestataire', $prestataire)
             ->setParameter('dayOfWeek', $dayOfWeek)
             ->setParameter('time', $timeString)
@@ -73,40 +205,55 @@ class AvailabilityRepository extends ServiceEntityRepository
     }
 
     /**
-     * Trouve les créneaux disponibles pour un jour donné
+     * Vérifie si un prestataire est disponible à une date et heure spécifiques
      */
-    public function findAvailableSlots(
+    public function isAvailableAtDateTime(
         Prestataire $prestataire,
-        int $dayOfWeek,
-        int $slotDuration = 60 // en minutes
-    ): array {
-        $availabilities = $this->findByPrestataireAndDay($prestataire, $dayOfWeek);
-        $slots = [];
+        \DateTimeInterface $dateTime
+    ): bool {
+        $dayOfWeek = (int) $dateTime->format('w');
+        $time = $dateTime->format('H:i:s');
 
-        foreach ($availabilities as $availability) {
-            $currentTime = clone $availability->getStartTime();
-            $endTime = $availability->getEndTime();
+        // Vérifier les disponibilités récurrentes
+        $recurringAvailable = $this->createQueryBuilder('a')
+            ->select('COUNT(a.id)')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.dayOfWeek = :dayOfWeek')
+            ->andWhere('a.isRecurring = true')
+            ->andWhere('a.startTime <= :time')
+            ->andWhere('a.endTime > :time')
+            ->andWhere('a.isActive = true')
+            ->setParameter('prestataire', $prestataire)
+            ->setParameter('dayOfWeek', $dayOfWeek)
+            ->setParameter('time', $time)
+            ->getQuery()
+            ->getSingleScalarResult();
 
-            while ($currentTime < $endTime) {
-                $slotEnd = (clone $currentTime)->modify("+{$slotDuration} minutes");
-                
-                if ($slotEnd <= $endTime) {
-                    $slots[] = [
-                        'start' => clone $currentTime,
-                        'end' => clone $slotEnd,
-                        'duration' => $slotDuration
-                    ];
-                }
-
-                $currentTime->modify("+{$slotDuration} minutes");
-            }
+        if ($recurringAvailable > 0) {
+            return true;
         }
 
-        return $slots;
+        // Vérifier les disponibilités ponctuelles
+        $specificDate = $dateTime->format('Y-m-d');
+        
+        $specificAvailable = $this->createQueryBuilder('a')
+            ->select('COUNT(a.id)')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.specificDate = :date')
+            ->andWhere('a.startTime <= :time')
+            ->andWhere('a.endTime > :time')
+            ->andWhere('a.isActive = true')
+            ->setParameter('prestataire', $prestataire)
+            ->setParameter('date', $specificDate)
+            ->setParameter('time', $time)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return $specificAvailable > 0;
     }
 
     /**
-     * Trouve les chevauchements de disponibilités pour un prestataire
+     * Trouve les disponibilités se chevauchant avec un créneau
      */
     public function findOverlapping(
         Prestataire $prestataire,
@@ -116,10 +263,14 @@ class AvailabilityRepository extends ServiceEntityRepository
         ?int $excludeId = null
     ): array {
         $qb = $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
+            ->where('a.prestataire = :prestataire')
             ->andWhere('a.dayOfWeek = :dayOfWeek')
-            ->andWhere('a.startTime < :endTime')
-            ->andWhere('a.endTime > :startTime')
+            ->andWhere('a.isActive = true')
+            ->andWhere('(
+                (a.startTime <= :startTime AND a.endTime > :startTime) OR
+                (a.startTime < :endTime AND a.endTime >= :endTime) OR
+                (a.startTime >= :startTime AND a.endTime <= :endTime)
+            )')
             ->setParameter('prestataire', $prestataire)
             ->setParameter('dayOfWeek', $dayOfWeek)
             ->setParameter('startTime', $startTime->format('H:i:s'))
@@ -133,167 +284,38 @@ class AvailabilityRepository extends ServiceEntityRepository
         return $qb->getQuery()->getResult();
     }
 
-    /**
-     * Compte les heures disponibles par semaine pour un prestataire
-     */
-    public function countWeeklyHours(Prestataire $prestataire): float
-    {
-        $availabilities = $this->findByPrestataire($prestataire);
-        $totalMinutes = 0;
-
-        foreach ($availabilities as $availability) {
-            $start = $availability->getStartTime();
-            $end = $availability->getEndTime();
-            
-            $diff = ($end->getTimestamp() - $start->getTimestamp()) / 60;
-            $totalMinutes += $diff;
-        }
-
-        return round($totalMinutes / 60, 2);
-    }
-
-    /**
-     * Trouve les disponibilités par jour de la semaine
-     */
-    public function findByDayOfWeek(int $dayOfWeek): array
-    {
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.dayOfWeek = :dayOfWeek')
-            ->setParameter('dayOfWeek', $dayOfWeek)
-            ->orderBy('a.startTime', 'ASC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Statistiques des disponibilités
-     */
-    public function getStatistics(?Prestataire $prestataire = null): array
-    {
-        $qb = $this->createQueryBuilder('a');
-
-        if ($prestataire) {
-            $qb->andWhere('a.prestataire = :prestataire')
-               ->setParameter('prestataire', $prestataire);
-        }
-
-        $availabilities = $qb->getQuery()->getResult();
-
-        $stats = [
-            'total_slots' => count($availabilities),
-            'total_hours' => 0,
-            'by_day' => array_fill(1, 7, ['count' => 0, 'hours' => 0]),
-            'earliest_start' => null,
-            'latest_end' => null,
-        ];
-
-        foreach ($availabilities as $availability) {
-            $dayOfWeek = $availability->getDayOfWeek();
-            $start = $availability->getStartTime();
-            $end = $availability->getEndTime();
-            
-            $hours = ($end->getTimestamp() - $start->getTimestamp()) / 3600;
-            
-            $stats['total_hours'] += $hours;
-            $stats['by_day'][$dayOfWeek]['count']++;
-            $stats['by_day'][$dayOfWeek]['hours'] += $hours;
-
-            // Heure la plus tôt
-            if (!$stats['earliest_start'] || $start < $stats['earliest_start']) {
-                $stats['earliest_start'] = $start;
-            }
-
-            // Heure la plus tard
-            if (!$stats['latest_end'] || $end > $stats['latest_end']) {
-                $stats['latest_end'] = $end;
-            }
-        }
-
-        return $stats;
-    }
-
-    /**
-     * Répartition des disponibilités par jour de la semaine
-     */
-    public function getDayDistribution(?Prestataire $prestataire = null): array
-    {
-        $qb = $this->createQueryBuilder('a')
-            ->select('a.dayOfWeek, COUNT(a.id) as count')
-            ->groupBy('a.dayOfWeek')
-            ->orderBy('a.dayOfWeek', 'ASC');
-
-        if ($prestataire) {
-            $qb->andWhere('a.prestataire = :prestataire')
-               ->setParameter('prestataire', $prestataire);
-        }
-
-        return $qb->getQuery()->getResult();
-    }
-
-    /**
-     * Heures de travail moyennes par jour de la semaine
-     */
-    public function getAverageHoursByDay(?Prestataire $prestataire = null): array
-    {
-        $qb = $this->createQueryBuilder('a');
-
-        if ($prestataire) {
-            $qb->andWhere('a.prestataire = :prestataire')
-               ->setParameter('prestataire', $prestataire);
-        }
-
-        $availabilities = $qb->getQuery()->getResult();
-
-        $dayStats = array_fill(1, 7, ['total_hours' => 0, 'count' => 0]);
-
-        foreach ($availabilities as $availability) {
-            $dayOfWeek = $availability->getDayOfWeek();
-            $start = $availability->getStartTime();
-            $end = $availability->getEndTime();
-            
-            $hours = ($end->getTimestamp() - $start->getTimestamp()) / 3600;
-            
-            $dayStats[$dayOfWeek]['total_hours'] += $hours;
-            $dayStats[$dayOfWeek]['count']++;
-        }
-
-        $result = [];
-        foreach ($dayStats as $day => $stats) {
-            $result[$day] = [
-                'day' => $day,
-                'day_name' => $this->getDayName($day),
-                'average_hours' => $stats['count'] > 0 
-                    ? round($stats['total_hours'] / $stats['count'], 2) 
-                    : 0
-            ];
-        }
-
-        return $result;
-    }
+    // ============================================
+    // RECHERCHE DE PRESTATAIRES DISPONIBLES
+    // ============================================
 
     /**
      * Trouve les prestataires disponibles à un moment donné
      */
     public function findAvailablePrestataires(
         int $dayOfWeek,
-        \DateTimeInterface $time
+        \DateTimeInterface $time,
+        ?array $serviceCategories = null
     ): array {
         $timeString = $time->format('H:i:s');
 
-        return $this->createQueryBuilder('a')
+        $qb = $this->createQueryBuilder('a')
             ->select('DISTINCT p')
             ->innerJoin('a.prestataire', 'p')
-            ->andWhere('a.dayOfWeek = :dayOfWeek')
+            ->where('a.dayOfWeek = :dayOfWeek')
             ->andWhere('a.startTime <= :time')
             ->andWhere('a.endTime > :time')
-            ->andWhere('p.isActive = :active')
-            ->andWhere('p.isApproved = :approved')
+            ->andWhere('a.isActive = true')
+            ->andWhere('p.isActive = true')
+            ->andWhere('p.isApproved = true')
             ->setParameter('dayOfWeek', $dayOfWeek)
-            ->setParameter('time', $timeString)
-            ->setParameter('active', true)
-            ->setParameter('approved', true)
-            ->getQuery()
-            ->getResult();
+            ->setParameter('time', $timeString);
+
+        if ($serviceCategories) {
+            $qb->andWhere('p.serviceCategories IN (:categories)')
+               ->setParameter('categories', $serviceCategories);
+        }
+
+        return $qb->getQuery()->getResult();
     }
 
     /**
@@ -304,10 +326,9 @@ class AvailabilityRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('a')
             ->select('p.id, p.firstName, p.lastName, COUNT(a.id) as availability_count')
             ->innerJoin('a.prestataire', 'p')
-            ->andWhere('p.isActive = :active')
-            ->andWhere('p.isApproved = :approved')
-            ->setParameter('active', true)
-            ->setParameter('approved', true)
+            ->where('a.isActive = true')
+            ->andWhere('p.isActive = true')
+            ->andWhere('p.isApproved = true')
             ->groupBy('p.id')
             ->orderBy('availability_count', 'DESC')
             ->setMaxResults($limit)
@@ -316,7 +337,7 @@ class AvailabilityRepository extends ServiceEntityRepository
     }
 
     /**
-     * Prestataires sans disponibilités définies
+     * Trouve les prestataires sans disponibilités définies
      */
     public function findPrestatairesWithoutAvailability(): array
     {
@@ -341,16 +362,154 @@ class AvailabilityRepository extends ServiceEntityRepository
         }
 
         return $this->getEntityManager()
-            ->getRepository('App\Entity\Prestataire')
+            ->getRepository(Prestataire::class)
             ->createQueryBuilder('p')
-            ->andWhere('p.id IN (:ids)')
+            ->where('p.id IN (:ids)')
             ->setParameter('ids', $prestataireIds)
             ->getQuery()
             ->getResult();
     }
 
+    // ============================================
+    // STATISTIQUES
+    // ============================================
+
     /**
-     * Crée un planning type de disponibilités
+     * Compte les heures disponibles par semaine pour un prestataire
+     */
+    public function countWeeklyHours(Prestataire $prestataire): float
+    {
+        $availabilities = $this->findRecurringByPrestataire($prestataire);
+        $totalMinutes = 0;
+
+        foreach ($availabilities as $availability) {
+            $start = $availability->getStartTime();
+            $end = $availability->getEndTime();
+            
+            $diff = ($end->getTimestamp() - $start->getTimestamp()) / 60;
+            $totalMinutes += $diff;
+        }
+
+        return round($totalMinutes / 60, 2);
+    }
+
+    /**
+     * Obtient les statistiques de disponibilités pour un prestataire
+     */
+    public function getStatistics(?Prestataire $prestataire = null): array
+    {
+        $qb = $this->createQueryBuilder('a');
+
+        if ($prestataire) {
+            $qb->where('a.prestataire = :prestataire')
+               ->setParameter('prestataire', $prestataire);
+        }
+
+        $qb->andWhere('a.isActive = true');
+
+        $availabilities = $qb->getQuery()->getResult();
+
+        $stats = [
+            'total_slots' => count($availabilities),
+            'total_hours' => 0,
+            'by_day' => array_fill(0, 7, ['count' => 0, 'hours' => 0]),
+            'earliest_start' => null,
+            'latest_end' => null,
+            'recurring_count' => 0,
+            'specific_count' => 0,
+        ];
+
+        foreach ($availabilities as $availability) {
+            $dayOfWeek = $availability->getDayOfWeek() ?? 0;
+            $start = $availability->getStartTime();
+            $end = $availability->getEndTime();
+            
+            $hours = ($end->getTimestamp() - $start->getTimestamp()) / 3600;
+            
+            $stats['total_hours'] += $hours;
+            $stats['by_day'][$dayOfWeek]['count']++;
+            $stats['by_day'][$dayOfWeek]['hours'] += $hours;
+
+            // Plus tôt / plus tard
+            if (!$stats['earliest_start'] || $start < $stats['earliest_start']) {
+                $stats['earliest_start'] = $start->format('H:i');
+            }
+
+            if (!$stats['latest_end'] || $end > $stats['latest_end']) {
+                $stats['latest_end'] = $end->format('H:i');
+            }
+
+            // Comptage récurrentes vs ponctuelles
+            if ($availability->isRecurring()) {
+                $stats['recurring_count']++;
+            } else {
+                $stats['specific_count']++;
+            }
+        }
+
+        // Calcul moyenne heures par jour
+        foreach ($stats['by_day'] as $day => $data) {
+            $stats['by_day'][$day]['avg_hours'] = $data['count'] > 0 
+                ? round($data['hours'] / $data['count'], 2) 
+                : 0;
+        }
+
+        $stats['total_hours'] = round($stats['total_hours'], 2);
+
+        return $stats;
+    }
+
+    /**
+     * Obtient la distribution des disponibilités par heure de la journée
+     */
+    public function getHourlyDistribution(?Prestataire $prestataire = null): array
+    {
+        $qb = $this->createQueryBuilder('a');
+
+        if ($prestataire) {
+            $qb->where('a.prestataire = :prestataire')
+               ->setParameter('prestataire', $prestataire);
+        }
+
+        $qb->andWhere('a.isActive = true');
+
+        $availabilities = $qb->getQuery()->getResult();
+
+        $distribution = array_fill(0, 24, 0);
+
+        foreach ($availabilities as $availability) {
+            $startHour = (int) $availability->getStartTime()->format('H');
+            $endHour = (int) $availability->getEndTime()->format('H');
+
+            for ($hour = $startHour; $hour < $endHour; $hour++) {
+                $distribution[$hour]++;
+            }
+        }
+
+        return $distribution;
+    }
+
+    /**
+     * Compte les disponibilités par prestataire (admin)
+     */
+    public function countByPrestataires(): array
+    {
+        return $this->createQueryBuilder('a')
+            ->select('p.id, p.firstName, p.lastName, COUNT(a.id) as availability_count, SUM(TIMESTAMPDIFF(HOUR, a.startTime, a.endTime)) as total_hours')
+            ->innerJoin('a.prestataire', 'p')
+            ->where('a.isActive = true')
+            ->groupBy('p.id')
+            ->orderBy('availability_count', 'DESC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    // ============================================
+    // UTILITAIRES
+    // ============================================
+
+    /**
+     * Crée un planning type de disponibilités (Lun-Ven 9h-18h)
      */
     public function createDefaultSchedule(
         Prestataire $prestataire,
@@ -368,8 +527,10 @@ class AvailabilityRepository extends ServiceEntityRepository
             $availability = new Availability();
             $availability->setPrestataire($prestataire);
             $availability->setDayOfWeek($day);
-            $availability->setStartTime(\DateTime::createFromFormat('H:i', $startTime));
-            $availability->setEndTime(\DateTime::createFromFormat('H:i', $endTime));
+            $availability->setStartTime(\DateTimeImmutable::createFromFormat('H:i', $startTime));
+            $availability->setEndTime(\DateTimeImmutable::createFromFormat('H:i', $endTime));
+            $availability->setIsRecurring(true);
+            $availability->setIsActive(true);
 
             $this->getEntityManager()->persist($availability);
             $availabilities[] = $availability;
@@ -396,6 +557,9 @@ class AvailabilityRepository extends ServiceEntityRepository
             $availability->setDayOfWeek($source->getDayOfWeek());
             $availability->setStartTime($source->getStartTime());
             $availability->setEndTime($source->getEndTime());
+            $availability->setIsRecurring($source->isRecurring());
+            $availability->setSpecificDate($source->getSpecificDate());
+            $availability->setIsActive(true);
 
             $this->getEntityManager()->persist($availability);
             $clonedAvailabilities[] = $availability;
@@ -407,340 +571,167 @@ class AvailabilityRepository extends ServiceEntityRepository
     }
 
     /**
-     * Exporte les disponibilités en CSV
+     * Désactive toutes les disponibilités d'un prestataire
      */
-    public function exportToCsv(array $availabilities): string
-    {
-        $handle = fopen('php://temp', 'r+');
-        
-        // En-têtes
-        fputcsv($handle, [
-            'Prestataire',
-            'Jour',
-            'Heure Début',
-            'Heure Fin',
-            'Durée (heures)'
-        ]);
-
-        // Données
-        foreach ($availabilities as $availability) {
-            $duration = ($availability->getEndTime()->getTimestamp() - 
-                        $availability->getStartTime()->getTimestamp()) / 3600;
-
-            fputcsv($handle, [
-                $availability->getPrestataire()->getFullName(),
-                $this->getDayName($availability->getDayOfWeek()),
-                $availability->getStartTime()->format('H:i'),
-                $availability->getEndTime()->format('H:i'),
-                round($duration, 2)
-            ]);
-        }
-
-        rewind($handle);
-        $csv = stream_get_contents($handle);
-        fclose($handle);
-
-        return $csv;
-    }
-
-    /**
-     * Retourne le nom du jour
-     */
-    private function getDayName(int $dayOfWeek): string
-    {
-        return match($dayOfWeek) {
-            0 => 'Dimanche',
-            1 => 'Lundi',
-            2 => 'Mardi',
-            3 => 'Mercredi',
-            4 => 'Jeudi',
-            5 => 'Vendredi',
-            6 => 'Samedi',
-            default => 'Inconnu',
-        };
-    }
-
-    /**
-     * Trouve les disponibilités avec des horaires inhabituels (très tôt ou très tard)
-     */
-    public function findUnusualHours(): array
+    public function deactivateAll(Prestataire $prestataire): int
     {
         return $this->createQueryBuilder('a')
-            ->andWhere('a.startTime < :earlyTime OR a.endTime > :lateTime')
-            ->setParameter('earlyTime', '07:00:00')
-            ->setParameter('lateTime', '20:00:00')
-            ->orderBy('a.startTime', 'ASC')
+            ->update()
+            ->set('a.isActive', 'false')
+            ->where('a.prestataire = :prestataire')
+            ->setParameter('prestataire', $prestataire)
             ->getQuery()
-            ->getResult();
+            ->execute();
     }
 
     /**
-     * Trouve les disponibilités courtes (moins de X heures)
+     * Active toutes les disponibilités d'un prestataire
      */
-    public function findShortAvailabilities(float $maxHours = 2): array
+    public function activateAll(Prestataire $prestataire): int
     {
-        $conn = $this->getEntityManager()->getConnection();
-        
-        $sql = '
-            SELECT *
-            FROM availabilities
-            WHERE TIMESTAMPDIFF(HOUR, start_time, end_time) < :maxHours
-            ORDER BY TIMESTAMPDIFF(HOUR, start_time, end_time) ASC
-        ';
+        return $this->createQueryBuilder('a')
+            ->update()
+            ->set('a.isActive', 'true')
+            ->where('a.prestataire = :prestataire')
+            ->setParameter('prestataire', $prestataire)
+            ->getQuery()
+            ->execute();
+    }
 
-        $stmt = $conn->prepare($sql);
-        $result = $stmt->executeQuery(['maxHours' => $maxHours]);
+    /**
+     * Supprime toutes les disponibilités d'un prestataire
+     */
+    public function deleteAll(Prestataire $prestataire): int
+    {
+        return $this->createQueryBuilder('a')
+            ->delete()
+            ->where('a.prestataire = :prestataire')
+            ->setParameter('prestataire', $prestataire)
+            ->getQuery()
+            ->execute();
+    }
 
-        $availabilityIds = array_column($result->fetchAllAssociative(), 'id');
-
-        if (empty($availabilityIds)) {
-            return [];
-        }
+    /**
+     * Supprime les disponibilités ponctuelles passées
+     */
+    public function deleteOldSpecificAvailabilities(int $days = 30): int
+    {
+        $cutoffDate = new \DateTimeImmutable("-{$days} days");
 
         return $this->createQueryBuilder('a')
-            ->andWhere('a.id IN (:ids)')
-            ->setParameter('ids', $availabilityIds)
+            ->delete()
+            ->where('a.isRecurring = false')
+            ->andWhere('a.specificDate IS NOT NULL')
+            ->andWhere('a.specificDate < :cutoffDate')
+            ->setParameter('cutoffDate', $cutoffDate)
             ->getQuery()
-            ->getResult();
+            ->execute();
     }
 
+    // ============================================
+    // RECHERCHE AVANCÉE
+    // ============================================
+
     /**
-     * Trouve les disponibilités longues (plus de X heures)
+     * Recherche avancée de disponibilités avec multiples critères
      */
-    public function findLongAvailabilities(float $minHours = 8): array
+    public function search(array $criteria): array
     {
-        $conn = $this->getEntityManager()->getConnection();
+        $qb = $this->createQueryBuilder('a');
+
+        // Filtre par prestataire
+        if (isset($criteria['prestataire_id'])) {
+            $qb->andWhere('a.prestataire = :prestataireId')
+               ->setParameter('prestataireId', $criteria['prestataire_id']);
+        }
+
+        // Filtre par jour de la semaine
+        if (isset($criteria['day_of_week'])) {
+            $qb->andWhere('a.dayOfWeek = :dayOfWeek')
+               ->setParameter('dayOfWeek', $criteria['day_of_week']);
+        }
+
+        // Filtre par jours multiples
+        if (isset($criteria['days_of_week']) && is_array($criteria['days_of_week'])) {
+            $qb->andWhere('a.dayOfWeek IN (:daysOfWeek)')
+               ->setParameter('daysOfWeek', $criteria['days_of_week']);
+        }
+
+        // Filtre récurrent/ponctuel
+        if (isset($criteria['is_recurring'])) {
+            $qb->andWhere('a.isRecurring = :isRecurring')
+               ->setParameter('isRecurring', $criteria['is_recurring']);
+        }
+
+        // Filtre actif/inactif
+        if (isset($criteria['is_active'])) {
+            $qb->andWhere('a.isActive = :isActive')
+               ->setParameter('isActive', $criteria['is_active']);
+        }
+
+        // Filtre par heure de début
+        if (isset($criteria['start_time_from'])) {
+            $qb->andWhere('a.startTime >= :startTimeFrom')
+               ->setParameter('startTimeFrom', $criteria['start_time_from']);
+        }
+
+        if (isset($criteria['start_time_to'])) {
+            $qb->andWhere('a.startTime <= :startTimeTo')
+               ->setParameter('startTimeTo', $criteria['start_time_to']);
+        }
+
+        // Filtre par heure de fin
+        if (isset($criteria['end_time_from'])) {
+            $qb->andWhere('a.endTime >= :endTimeFrom')
+               ->setParameter('endTimeFrom', $criteria['end_time_from']);
+        }
+
+        if (isset($criteria['end_time_to'])) {
+            $qb->andWhere('a.endTime <= :endTimeTo')
+               ->setParameter('endTimeTo', $criteria['end_time_to']);
+        }
+
+        // Filtre par date spécifique
+        if (isset($criteria['specific_date'])) {
+            $qb->andWhere('a.specificDate = :specificDate')
+               ->setParameter('specificDate', $criteria['specific_date']);
+        }
+
+        // Tri
+        $orderBy = $criteria['order_by'] ?? 'dayOfWeek';
+        $orderDirection = $criteria['order_direction'] ?? 'ASC';
         
-        $sql = '
-            SELECT *
-            FROM availabilities
-            WHERE TIMESTAMPDIFF(HOUR, start_time, end_time) > :minHours
-            ORDER BY TIMESTAMPDIFF(HOUR, start_time, end_time) DESC
-        ';
+        $qb->orderBy('a.' . $orderBy, $orderDirection);
 
-        $stmt = $conn->prepare($sql);
-        $result = $stmt->executeQuery(['minHours' => $minHours]);
-
-        $availabilityIds = array_column($result->fetchAllAssociative(), 'id');
-
-        if (empty($availabilityIds)) {
-            return [];
+        // Tri secondaire
+        if ($orderBy !== 'startTime') {
+            $qb->addOrderBy('a.startTime', 'ASC');
         }
 
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.id IN (:ids)')
-            ->setParameter('ids', $availabilityIds)
-            ->getQuery()
-            ->getResult();
+        // Limite
+        if (isset($criteria['limit'])) {
+            $qb->setMaxResults($criteria['limit']);
+        }
+
+        // Offset
+        if (isset($criteria['offset'])) {
+            $qb->setFirstResult($criteria['offset']);
+        }
+
+        return $qb->getQuery()->getResult();
     }
 
+    // ============================================
+    // QUERY BUILDER PERSONNALISÉ
+    // ============================================
+
     /**
-     * Optimise les disponibilités en fusionnant les créneaux consécutifs
+     * Crée un QueryBuilder de base avec les jointures courantes
      */
-    public function optimizeAvailabilities(Prestataire $prestataire): int
+    public function createBaseQueryBuilder(string $alias = 'a'): QueryBuilder
     {
-        $optimized = 0;
-
-        for ($day = 0; $day <= 6; $day++) {
-            $dayAvailabilities = $this->findByPrestataireAndDay($prestataire, $day);
-
-            if (count($dayAvailabilities) < 2) {
-                continue;
-            }
-
-            // Trier par heure de début
-            usort($dayAvailabilities, fn($a, $b) => 
-                $a->getStartTime() <=> $b->getStartTime()
-            );
-
-            $toRemove = [];
-
-            for ($i = 0; $i < count($dayAvailabilities) - 1; $i++) {
-                $current = $dayAvailabilities[$i];
-                $next = $dayAvailabilities[$i + 1];
-
-                // Si les créneaux se touchent ou se chevauchent
-                if ($current->getEndTime() >= $next->getStartTime()) {
-                    // Étendre le créneau actuel
-                    if ($next->getEndTime() > $current->getEndTime()) {
-                        $current->setEndTime($next->getEndTime());
-                    }
-
-                    // Marquer le suivant pour suppression
-                    $toRemove[] = $next;
-                    $optimized++;
-                }
-            }
-
-            // Supprimer les disponibilités fusionnées
-            foreach ($toRemove as $availability) {
-                $this->getEntityManager()->remove($availability);
-            }
-        }
-
-        if ($optimized > 0) {
-            $this->getEntityManager()->flush();
-        }
-
-        return $optimized;
-    }
-
-    /**
-     * Vérifie la cohérence des disponibilités (pas de chevauchements)
-     */
-    public function validateConsistency(Prestataire $prestataire): array
-    {
-        $errors = [];
-
-        for ($day = 0; $day <= 6; $day++) {
-            $dayAvailabilities = $this->findByPrestataireAndDay($prestataire, $day);
-
-            for ($i = 0; $i < count($dayAvailabilities); $i++) {
-                $current = $dayAvailabilities[$i];
-
-                // Vérifier que l'heure de fin est après l'heure de début
-                if ($current->getStartTime() >= $current->getEndTime()) {
-                    $errors[] = [
-                        'type' => 'invalid_time_range',
-                        'availability' => $current,
-                        'message' => 'L\'heure de fin doit être après l\'heure de début'
-                    ];
-                }
-
-                // Vérifier les chevauchements
-                for ($j = $i + 1; $j < count($dayAvailabilities); $j++) {
-                    $other = $dayAvailabilities[$j];
-
-                    if ($current->getStartTime() < $other->getEndTime() && 
-                        $current->getEndTime() > $other->getStartTime()) {
-                        $errors[] = [
-                            'type' => 'overlap',
-                            'availability1' => $current,
-                            'availability2' => $other,
-                            'message' => 'Chevauchement de disponibilités'
-                        ];
-                    }
-                }
-            }
-        }
-
-        return $errors;
-    }
-
-    /**
-     * Génère un calendrier visuel des disponibilités
-     */
-    public function generateWeeklyCalendar(Prestataire $prestataire): array
-    {
-        $calendar = [];
-
-        for ($day = 0; $day <= 6; $day++) {
-            $availabilities = $this->findByPrestataireAndDay($prestataire, $day);
-            
-            $calendar[$day] = [
-                'day' => $day,
-                'day_name' => $this->getDayName($day),
-                'availabilities' => $availabilities,
-                'total_hours' => 0
-            ];
-
-            foreach ($availabilities as $availability) {
-                $hours = ($availability->getEndTime()->getTimestamp() - 
-                         $availability->getStartTime()->getTimestamp()) / 3600;
-                $calendar[$day]['total_hours'] += $hours;
-            }
-
-            $calendar[$day]['total_hours'] = round($calendar[$day]['total_hours'], 2);
-        }
-
-        return $calendar;
-    }
-
-    /**
-     * Trouve les trous dans le planning (périodes sans disponibilité)
-     */
-    public function findGapsInSchedule(
-        Prestataire $prestataire,
-        string $workStart = '08:00',
-        string $workEnd = '19:00'
-    ): array {
-        $gaps = [];
-        $workStartTime = \DateTime::createFromFormat('H:i', $workStart);
-        $workEndTime = \DateTime::createFromFormat('H:i', $workEnd);
-
-        for ($day = 1; $day <= 5; $day++) { // Lundi à Vendredi
-            $availabilities = $this->findByPrestataireAndDay($prestataire, $day);
-
-            if (empty($availabilities)) {
-                $gaps[] = [
-                    'day' => $day,
-                    'day_name' => $this->getDayName($day),
-                    'start' => $workStartTime,
-                    'end' => $workEndTime,
-                    'duration' => ($workEndTime->getTimestamp() - $workStartTime->getTimestamp()) / 3600
-                ];
-                continue;
-            }
-
-            // Trier par heure de début
-            usort($availabilities, fn($a, $b) => 
-                $a->getStartTime() <=> $b->getStartTime()
-            );
-
-            // Trou avant la première disponibilité
-            if ($availabilities[0]->getStartTime() > $workStartTime) {
-                $gaps[] = [
-                    'day' => $day,
-                    'day_name' => $this->getDayName($day),
-                    'start' => $workStartTime,
-                    'end' => $availabilities[0]->getStartTime(),
-                    'duration' => ($availabilities[0]->getStartTime()->getTimestamp() - 
-                                  $workStartTime->getTimestamp()) / 3600
-                ];
-            }
-
-            // Trous entre les disponibilités
-            for ($i = 0; $i < count($availabilities) - 1; $i++) {
-                $current = $availabilities[$i];
-                $next = $availabilities[$i + 1];
-
-                if ($current->getEndTime() < $next->getStartTime()) {
-                    $gaps[] = [
-                        'day' => $day,
-                        'day_name' => $this->getDayName($day),
-                        'start' => $current->getEndTime(),
-                        'end' => $next->getStartTime(),
-                        'duration' => ($next->getStartTime()->getTimestamp() - 
-                                      $current->getEndTime()->getTimestamp()) / 3600
-                    ];
-                }
-            }
-
-            // Trou après la dernière disponibilité
-            $lastAvailability = end($availabilities);
-            if ($lastAvailability->getEndTime() < $workEndTime) {
-                $gaps[] = [
-                    'day' => $day,
-                    'day_name' => $this->getDayName($day),
-                    'start' => $lastAvailability->getEndTime(),
-                    'end' => $workEndTime,
-                    'duration' => ($workEndTime->getTimestamp() - 
-                                  $lastAvailability->getEndTime()->getTimestamp()) / 3600
-                ];
-            }
-        }
-
-        return $gaps;
-    }
-
-    /**
-     * Taux de couverture hebdomadaire
-     */
-    public function getWeeklyCoverageRate(
-        Prestataire $prestataire,
-        float $standardWeeklyHours = 40
-    ): float {
-        $actualHours = $this->countWeeklyHours($prestataire);
-        return round(($actualHours / $standardWeeklyHours) * 100, 2);
+        return $this->createQueryBuilder($alias)
+            ->leftJoin($alias . '.prestataire', 'p')
+            ->leftJoin($alias . '.generatedSlots', 's');
     }
 }

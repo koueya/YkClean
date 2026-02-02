@@ -1,14 +1,20 @@
 <?php
-// src/Repository/AbsenceRepository.php
+// src/Repository/Planning/AbsenceRepository.php
 
 namespace App\Repository\Planning;
 
 use App\Entity\Planning\Absence;
+use App\Entity\User\Admin;
 use App\Entity\User\Prestataire;
+use App\Entity\Booking\Booking;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\ORM\QueryBuilder;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
+ * Repository pour l'entité Absence
+ * Gère toutes les requêtes liées aux absences et indisponibilités des prestataires
+ * 
  * @extends ServiceEntityRepository<Absence>
  */
 class AbsenceRepository extends ServiceEntityRepository
@@ -19,69 +25,156 @@ class AbsenceRepository extends ServiceEntityRepository
     }
 
     /**
-     * Trouve toutes les absences d'un prestataire
+     * Persiste une absence
      */
-    public function findByPrestataire(Prestataire $prestataire): array
+    public function save(Absence $absence, bool $flush = false): void
     {
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->setParameter('prestataire', $prestataire)
-            ->orderBy('a.startDate', 'DESC')
-            ->getQuery()
-            ->getResult();
+        $this->getEntityManager()->persist($absence);
+
+        if ($flush) {
+            $this->getEntityManager()->flush();
+        }
     }
 
     /**
-     * Trouve les absences actives (en cours)
+     * Supprime une absence
+     */
+    public function remove(Absence $absence, bool $flush = false): void
+    {
+        $this->getEntityManager()->remove($absence);
+
+        if ($flush) {
+            $this->getEntityManager()->flush();
+        }
+    }
+
+    // ============================================
+    // RECHERCHE PAR PRESTATAIRE
+    // ============================================
+
+    /**
+     * Trouve toutes les absences d'un prestataire
+     */
+    public function findByPrestataire(
+        Prestataire $prestataire,
+        ?string $status = null,
+        ?string $type = null
+    ): array {
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.prestataire = :prestataire')
+            ->setParameter('prestataire', $prestataire)
+            ->orderBy('a.startDate', 'DESC');
+
+        if ($status) {
+            $qb->andWhere('a.status = :status')
+               ->setParameter('status', $status);
+        }
+
+        if ($type) {
+            $qb->andWhere('a.type = :type')
+               ->setParameter('type', $type);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les absences actives (en cours) d'un prestataire
      */
     public function findActiveByPrestataire(Prestataire $prestataire): array
     {
-        $today = new \DateTime();
+        $now = new \DateTimeImmutable();
         
         return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->andWhere('a.startDate <= :today')
-            ->andWhere('a.endDate >= :today')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.startDate <= :now')
+            ->andWhere('a.endDate >= :now')
+            ->andWhere('a.status IN (:activeStatuses)')
             ->setParameter('prestataire', $prestataire)
-            ->setParameter('today', $today)
+            ->setParameter('now', $now)
+            ->setParameter('activeStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
             ->orderBy('a.startDate', 'ASC')
             ->getQuery()
             ->getResult();
     }
 
     /**
-     * Trouve les absences futures
+     * Trouve les absences futures d'un prestataire
      */
-    public function findFutureByPrestataire(Prestataire $prestataire): array
+    public function findFutureByPrestataire(Prestataire $prestataire, int $limit = null): array
     {
-        $today = new \DateTime();
+        $now = new \DateTimeImmutable();
+        
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.startDate > :now')
+            ->andWhere('a.status IN (:validStatuses)')
+            ->setParameter('prestataire', $prestataire)
+            ->setParameter('now', $now)
+            ->setParameter('validStatuses', [
+                Absence::STATUS_PENDING,
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
+            ->orderBy('a.startDate', 'ASC');
+
+        if ($limit) {
+            $qb->setMaxResults($limit);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les absences passées d'un prestataire
+     */
+    public function findPastByPrestataire(Prestataire $prestataire, int $limit = 20): array
+    {
+        $now = new \DateTimeImmutable();
         
         return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->andWhere('a.startDate > :today')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.endDate < :now')
             ->setParameter('prestataire', $prestataire)
-            ->setParameter('today', $today)
-            ->orderBy('a.startDate', 'ASC')
+            ->setParameter('now', $now)
+            ->orderBy('a.endDate', 'DESC')
+            ->setMaxResults($limit)
             ->getQuery()
             ->getResult();
     }
 
     /**
-     * Trouve les absences passées
+     * Compte les absences d'un prestataire
      */
-    public function findPastByPrestataire(Prestataire $prestataire): array
-    {
-        $today = new \DateTime();
-        
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->andWhere('a.endDate < :today')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('today', $today)
-            ->orderBy('a.startDate', 'DESC')
-            ->getQuery()
-            ->getResult();
+    public function countByPrestataire(
+        Prestataire $prestataire,
+        ?string $status = null,
+        ?string $type = null
+    ): int {
+        $qb = $this->createQueryBuilder('a')
+            ->select('COUNT(a.id)')
+            ->where('a.prestataire = :prestataire')
+            ->setParameter('prestataire', $prestataire);
+
+        if ($status) {
+            $qb->andWhere('a.status = :status')
+               ->setParameter('status', $status);
+        }
+
+        if ($type) {
+            $qb->andWhere('a.type = :type')
+               ->setParameter('type', $type);
+        }
+
+        return (int) $qb->getQuery()->getSingleScalarResult();
     }
+
+    // ============================================
+    // RECHERCHE PAR PÉRIODE
+    // ============================================
 
     /**
      * Trouve les absences entre deux dates
@@ -89,18 +182,24 @@ class AbsenceRepository extends ServiceEntityRepository
     public function findBetweenDates(
         Prestataire $prestataire,
         \DateTimeInterface $startDate,
-        \DateTimeInterface $endDate
+        \DateTimeInterface $endDate,
+        ?string $status = null
     ): array {
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.prestataire = :prestataire')
             ->andWhere('a.startDate <= :endDate')
             ->andWhere('a.endDate >= :startDate')
             ->setParameter('prestataire', $prestataire)
             ->setParameter('startDate', $startDate)
             ->setParameter('endDate', $endDate)
-            ->orderBy('a.startDate', 'ASC')
-            ->getQuery()
-            ->getResult();
+            ->orderBy('a.startDate', 'ASC');
+
+        if ($status) {
+            $qb->andWhere('a.status = :status')
+               ->setParameter('status', $status);
+        }
+
+        return $qb->getQuery()->getResult();
     }
 
     /**
@@ -112,11 +211,16 @@ class AbsenceRepository extends ServiceEntityRepository
     ): bool {
         $count = $this->createQueryBuilder('a')
             ->select('COUNT(a.id)')
-            ->andWhere('a.prestataire = :prestataire')
+            ->where('a.prestataire = :prestataire')
             ->andWhere('a.startDate <= :date')
             ->andWhere('a.endDate >= :date')
+            ->andWhere('a.status IN (:activeStatuses)')
             ->setParameter('prestataire', $prestataire)
             ->setParameter('date', $date)
+            ->setParameter('activeStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
             ->getQuery()
             ->getSingleScalarResult();
 
@@ -124,7 +228,7 @@ class AbsenceRepository extends ServiceEntityRepository
     }
 
     /**
-     * Trouve les absences qui chevauchent une période
+     * Trouve les absences se chevauchant avec une période
      */
     public function findOverlapping(
         Prestataire $prestataire,
@@ -133,13 +237,14 @@ class AbsenceRepository extends ServiceEntityRepository
         ?int $excludeId = null
     ): array {
         $qb = $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
+            ->where('a.prestataire = :prestataire')
             ->andWhere('a.startDate <= :endDate')
             ->andWhere('a.endDate >= :startDate')
+            ->andWhere('a.status != :cancelled')
             ->setParameter('prestataire', $prestataire)
             ->setParameter('startDate', $startDate)
             ->setParameter('endDate', $endDate)
-            ->orderBy('a.startDate', 'ASC');
+            ->setParameter('cancelled', Absence::STATUS_CANCELLED);
 
         if ($excludeId) {
             $qb->andWhere('a.id != :excludeId')
@@ -150,220 +255,199 @@ class AbsenceRepository extends ServiceEntityRepository
     }
 
     /**
-     * Trouve les absences par raison
+     * Trouve les absences du jour
      */
-    public function findByReason(
-        Prestataire $prestataire,
-        string $reason
-    ): array {
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->andWhere('a.reason LIKE :reason')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('reason', '%' . $reason . '%')
-            ->orderBy('a.startDate', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
+    public function findToday(?Prestataire $prestataire = null): array
+    {
+        $today = new \DateTimeImmutable();
+        $todayStart = $today->setTime(0, 0, 0);
+        $todayEnd = $today->setTime(23, 59, 59);
 
-    /**
-     * Compte le nombre total de jours d'absence
-     */
-    public function countTotalDays(
-        Prestataire $prestataire,
-        ?\DateTimeInterface $startDate = null,
-        ?\DateTimeInterface $endDate = null
-    ): int {
-        $absences = $this->findBetweenDates(
-            $prestataire,
-            $startDate ?? new \DateTime('-1 year'),
-            $endDate ?? new \DateTime()
-        );
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.startDate <= :todayEnd')
+            ->andWhere('a.endDate >= :todayStart')
+            ->andWhere('a.status IN (:activeStatuses)')
+            ->setParameter('todayStart', $todayStart)
+            ->setParameter('todayEnd', $todayEnd)
+            ->setParameter('activeStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ]);
 
-        $totalDays = 0;
-        foreach ($absences as $absence) {
-            $totalDays += $absence->getDuration();
+        if ($prestataire) {
+            $qb->andWhere('a.prestataire = :prestataire')
+               ->setParameter('prestataire', $prestataire);
         }
 
-        return $totalDays;
-    }
-
-    /**
-     * Trouve les absences les plus longues
-     */
-    public function findLongest(
-        Prestataire $prestataire,
-        int $limit = 10
-    ): array {
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->setParameter('prestataire', $prestataire)
-            ->orderBy('DATEDIFF(a.endDate, a.startDate)', 'DESC')
-            ->setMaxResults($limit)
+        return $qb->orderBy('a.startDate', 'ASC')
             ->getQuery()
             ->getResult();
     }
 
+    // ============================================
+    // RECHERCHE PAR STATUT
+    // ============================================
+
     /**
-     * Trouve les absences récentes
+     * Trouve les absences par statut
      */
-    public function findRecent(
-        Prestataire $prestataire,
-        int $days = 30,
-        int $limit = 10
+    public function findByStatus(string $status, ?Prestataire $prestataire = null): array
+    {
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.status = :status')
+            ->setParameter('status', $status)
+            ->orderBy('a.startDate', 'DESC');
+
+        if ($prestataire) {
+            $qb->andWhere('a.prestataire = :prestataire')
+               ->setParameter('prestataire', $prestataire);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les absences en attente d'approbation
+     */
+    public function findPending(?int $limit = null): array
+    {
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.status = :status')
+            ->setParameter('status', Absence::STATUS_PENDING)
+            ->orderBy('a.createdAt', 'ASC'); // Les plus anciennes en premier
+
+        if ($limit) {
+            $qb->setMaxResults($limit);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les absences approuvées
+     */
+    public function findApproved(?Prestataire $prestataire = null): array
+    {
+        return $this->findByStatus(Absence::STATUS_APPROVED, $prestataire);
+    }
+
+    /**
+     * Trouve les absences rejetées
+     */
+    public function findRejected(?Prestataire $prestataire = null): array
+    {
+        return $this->findByStatus(Absence::STATUS_REJECTED, $prestataire);
+    }
+
+    // ============================================
+    // RECHERCHE PAR TYPE
+    // ============================================
+
+    /**
+     * Trouve les absences par type
+     */
+    public function findByType(
+        string $type,
+        ?Prestataire $prestataire = null,
+        ?int $limit = null
     ): array {
-        $sinceDate = (new \DateTime())->modify("-{$days} days");
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.type = :type')
+            ->setParameter('type', $type)
+            ->orderBy('a.startDate', 'DESC');
+
+        if ($prestataire) {
+            $qb->andWhere('a.prestataire = :prestataire')
+               ->setParameter('prestataire', $prestataire);
+        }
+
+        if ($limit) {
+            $qb->setMaxResults($limit);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Compte les absences par type pour un prestataire
+     */
+    public function countByTypeForPrestataire(Prestataire $prestataire): array
+    {
+        $result = $this->createQueryBuilder('a')
+            ->select('a.type, COUNT(a.id) as count')
+            ->where('a.prestataire = :prestataire')
+            ->setParameter('prestataire', $prestataire)
+            ->groupBy('a.type')
+            ->getQuery()
+            ->getResult();
+
+        $counts = [];
+        foreach ($result as $row) {
+            $counts[$row['type']] = (int) $row['count'];
+        }
+
+        return $counts;
+    }
+
+    // ============================================
+    // GESTION DES REMPLACEMENTS
+    // ============================================
+
+    /**
+     * Trouve les absences nécessitant un remplacement
+     */
+    public function findRequiringReplacement(?Prestataire $prestataire = null): array
+    {
+        $now = new \DateTimeImmutable();
+
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.requiresReplacement = true')
+            ->andWhere('a.endDate >= :now')
+            ->andWhere('a.status IN (:activeStatuses)')
+            ->setParameter('now', $now)
+            ->setParameter('activeStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
+            ->orderBy('a.startDate', 'ASC');
+
+        if ($prestataire) {
+            $qb->andWhere('a.prestataire = :prestataire')
+               ->setParameter('prestataire', $prestataire);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les absences qui affectent des réservations
+     */
+    public function findAffectingBookings(Prestataire $prestataire): array
+    {
+        $now = new \DateTimeImmutable();
         
         return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->andWhere('a.createdAt >= :sinceDate')
+            ->innerJoin('a.affectedBookings', 'b')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.endDate >= :now')
+            ->andWhere('a.status IN (:activeStatuses)')
             ->setParameter('prestataire', $prestataire)
-            ->setParameter('sinceDate', $sinceDate)
-            ->orderBy('a.createdAt', 'DESC')
-            ->setMaxResults($limit)
+            ->setParameter('now', $now)
+            ->setParameter('activeStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
+            ->orderBy('a.startDate', 'ASC')
             ->getQuery()
             ->getResult();
     }
 
-    /**
-     * Statistiques des absences
-     */
-    public function getStatistics(
-        Prestataire $prestataire,
-        ?\DateTimeInterface $startDate = null,
-        ?\DateTimeInterface $endDate = null
-    ): array {
-        $startDate = $startDate ?? (new \DateTime())->modify('-1 year');
-        $endDate = $endDate ?? new \DateTime();
-
-        $absences = $this->findBetweenDates($prestataire, $startDate, $endDate);
-
-        $totalDays = 0;
-        $reasonCounts = [];
-        $longestAbsence = 0;
-
-        foreach ($absences as $absence) {
-            $duration = $absence->getDuration();
-            $totalDays += $duration;
-            
-            if ($duration > $longestAbsence) {
-                $longestAbsence = $duration;
-            }
-
-            $reason = $absence->getReason();
-            if (!isset($reasonCounts[$reason])) {
-                $reasonCounts[$reason] = 0;
-            }
-            $reasonCounts[$reason]++;
-        }
-
-        arsort($reasonCounts);
-
-        return [
-            'total_absences' => count($absences),
-            'total_days' => $totalDays,
-            'average_duration' => count($absences) > 0 ? round($totalDays / count($absences), 2) : 0,
-            'longest_absence' => $longestAbsence,
-            'reasons' => $reasonCounts,
-            'active_absences' => count($this->findActiveByPrestataire($prestataire)),
-            'future_absences' => count($this->findFutureByPrestataire($prestataire))
-        ];
-    }
+    // ============================================
+    // VALIDATION
+    // ============================================
 
     /**
-     * Trouve les absences par mois
-     */
-    public function findByMonth(
-        Prestataire $prestataire,
-        int $year,
-        int $month
-    ): array {
-        $startDate = new \DateTime("{$year}-{$month}-01");
-        $endDate = (clone $startDate)->modify('last day of this month');
-
-        return $this->findBetweenDates($prestataire, $startDate, $endDate);
-    }
-
-    /**
-     * Trouve les absences par année
-     */
-    public function findByYear(
-        Prestataire $prestataire,
-        int $year
-    ): array {
-        $startDate = new \DateTime("{$year}-01-01");
-        $endDate = new \DateTime("{$year}-12-31");
-
-        return $this->findBetweenDates($prestataire, $startDate, $endDate);
-    }
-
-    /**
-     * Répartition des absences par mois (pour graphique)
-     */
-    public function getMonthlyDistribution(
-        Prestataire $prestataire,
-        int $year
-    ): array {
-        $absences = $this->findByYear($prestataire, $year);
-
-        $distribution = array_fill(1, 12, 0);
-
-        foreach ($absences as $absence) {
-            $startMonth = (int)$absence->getStartDate()->format('n');
-            $endMonth = (int)$absence->getEndDate()->format('n');
-
-            if ($startMonth === $endMonth) {
-                $distribution[$startMonth] += $absence->getDuration();
-            } else {
-                // Répartir sur plusieurs mois
-                for ($m = $startMonth; $m <= $endMonth; $m++) {
-                    $monthStart = new \DateTime("{$year}-{$m}-01");
-                    $monthEnd = (clone $monthStart)->modify('last day of this month');
-
-                    $periodStart = max($absence->getStartDate(), $monthStart);
-                    $periodEnd = min($absence->getEndDate(), $monthEnd);
-
-                    $days = $periodStart->diff($periodEnd)->days + 1;
-                    $distribution[$m] += $days;
-                }
-            }
-        }
-
-        return $distribution;
-    }
-
-    /**
-     * Trouve les raisons d'absence les plus fréquentes
-     */
-    public function getTopReasons(
-        Prestataire $prestataire,
-        int $limit = 5
-    ): array {
-        $conn = $this->getEntityManager()->getConnection();
-        
-        $sql = '
-            SELECT 
-                reason,
-                COUNT(*) as count,
-                SUM(DATEDIFF(end_date, start_date) + 1) as total_days
-            FROM absences
-            WHERE prestataire_id = :prestataireId
-            GROUP BY reason
-            ORDER BY count DESC
-            LIMIT :limit
-        ';
-
-        $stmt = $conn->prepare($sql);
-        $result = $stmt->executeQuery([
-            'prestataireId' => $prestataire->getId(),
-            'limit' => $limit
-        ]);
-
-        return $result->fetchAllAssociative();
-    }
-
-    /**
-     * Vérifie si une période d'absence est valide (pas de chevauchement)
+     * Valide une période d'absence (vérifie les chevauchements)
      */
     public function validateAbsencePeriod(
         Prestataire $prestataire,
@@ -381,162 +465,331 @@ class AbsenceRepository extends ServiceEntityRepository
     }
 
     /**
-     * Trouve les absences qui affectent des réservations
+     * Vérifie si une absence peut être approuvée
      */
-    public function findAffectingBookings(Prestataire $prestataire): array
+    public function canApprove(Absence $absence): array
     {
-        $today = new \DateTime();
-        
-        // Absences futures et en cours
-        $absences = $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->andWhere('a.endDate >= :today')
+        $errors = [];
+
+        // Vérifier que l'absence n'est pas déjà terminée
+        $now = new \DateTimeImmutable();
+        if ($absence->getEndDate() < $now) {
+            $errors[] = 'Cannot approve past absence';
+        }
+
+        // Vérifier les chevauchements
+        $validation = $this->validateAbsencePeriod(
+            $absence->getPrestataire(),
+            $absence->getStartDate(),
+            $absence->getEndDate(),
+            $absence->getId()
+        );
+
+        if (!$validation['is_valid']) {
+            $errors[] = 'Absence overlaps with existing absence(s)';
+        }
+
+        return [
+            'can_approve' => empty($errors),
+            'errors' => $errors
+        ];
+    }
+
+    // ============================================
+    // STATISTIQUES
+    // ============================================
+
+    /**
+     * Calcule le total de jours d'absence pour un prestataire
+     */
+    public function getTotalDaysForPrestataire(
+        Prestataire $prestataire,
+        ?\DateTimeInterface $startDate = null,
+        ?\DateTimeInterface $endDate = null
+    ): int {
+        $qb = $this->createQueryBuilder('a')
+            ->select('SUM(DATEDIFF(a.endDate, a.startDate) + 1)')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.status IN (:validStatuses)')
             ->setParameter('prestataire', $prestataire)
-            ->setParameter('today', $today)
+            ->setParameter('validStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ]);
+
+        if ($startDate) {
+            $qb->andWhere('a.startDate >= :startDate')
+               ->setParameter('startDate', $startDate);
+        }
+
+        if ($endDate) {
+            $qb->andWhere('a.endDate <= :endDate')
+               ->setParameter('endDate', $endDate);
+        }
+
+        $result = $qb->getQuery()->getSingleScalarResult();
+
+        return (int) ($result ?? 0);
+    }
+
+    /**
+     * Obtient les statistiques d'absences pour un prestataire
+     */
+    public function getStatisticsForPrestataire(
+        Prestataire $prestataire,
+        ?int $year = null
+    ): array {
+        $year = $year ?? (int) date('Y');
+        $startDate = new \DateTimeImmutable("{$year}-01-01");
+        $endDate = new \DateTimeImmutable("{$year}-12-31");
+
+        $totalDays = $this->getTotalDaysForPrestataire($prestataire, $startDate, $endDate);
+        
+        $byType = $this->createQueryBuilder('a')
+            ->select('a.type, COUNT(a.id) as count, SUM(DATEDIFF(a.endDate, a.startDate) + 1) as total_days')
+            ->where('a.prestataire = :prestataire')
+            ->andWhere('a.startDate >= :startDate')
+            ->andWhere('a.endDate <= :endDate')
+            ->andWhere('a.status IN (:validStatuses)')
+            ->setParameter('prestataire', $prestataire)
+            ->setParameter('startDate', $startDate)
+            ->setParameter('endDate', $endDate)
+            ->setParameter('validStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
+            ->groupBy('a.type')
             ->getQuery()
             ->getResult();
 
-        $bookingRepository = $this->getEntityManager()->getRepository(\App\Entity\Booking::class);
-        $absencesWithBookings = [];
-
-        foreach ($absences as $absence) {
-            $affectedBookings = $bookingRepository->findBetweenDates(
-                $absence->getStartDate(),
-                $absence->getEndDate(),
-                $prestataire
-            );
-
-            if (!empty($affectedBookings)) {
-                $absencesWithBookings[] = [
-                    'absence' => $absence,
-                    'affected_bookings' => $affectedBookings,
-                    'bookings_count' => count($affectedBookings)
-                ];
-            }
+        $typeStats = [];
+        foreach ($byType as $stat) {
+            $typeStats[$stat['type']] = [
+                'count' => (int) $stat['count'],
+                'total_days' => (int) $stat['total_days']
+            ];
         }
 
-        return $absencesWithBookings;
+        $total = $this->countByPrestataire($prestataire);
+        $pending = $this->countByPrestataire($prestataire, Absence::STATUS_PENDING);
+        $approved = $this->countByPrestataire($prestataire, Absence::STATUS_APPROVED);
+
+        return [
+            'year' => $year,
+            'total_absences' => $total,
+            'total_days' => $totalDays,
+            'pending' => $pending,
+            'approved' => $approved,
+            'by_type' => $typeStats,
+        ];
     }
 
     /**
-     * Calcule le taux d'absence
+     * Obtient les statistiques globales (admin)
      */
-    public function calculateAbsenceRate(
-        Prestataire $prestataire,
-        \DateTimeInterface $startDate,
-        \DateTimeInterface $endDate
-    ): float {
-        $totalDays = $startDate->diff($endDate)->days + 1;
-        $absenceDays = $this->countTotalDays($prestataire, $startDate, $endDate);
+    public function getGlobalStatistics(): array
+    {
+        $now = new \DateTimeImmutable();
 
-        if ($totalDays === 0) {
-            return 0;
-        }
+        $total = (int) $this->createQueryBuilder('a')
+            ->select('COUNT(a.id)')
+            ->getQuery()
+            ->getSingleScalarResult();
 
-        return round(($absenceDays / $totalDays) * 100, 2);
+        $pending = (int) $this->createQueryBuilder('a')
+            ->select('COUNT(a.id)')
+            ->where('a.status = :status')
+            ->setParameter('status', Absence::STATUS_PENDING)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $active = (int) $this->createQueryBuilder('a')
+            ->select('COUNT(a.id)')
+            ->where('a.startDate <= :now')
+            ->andWhere('a.endDate >= :now')
+            ->andWhere('a.status IN (:activeStatuses)')
+            ->setParameter('now', $now)
+            ->setParameter('activeStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $requiresReplacement = (int) $this->createQueryBuilder('a')
+            ->select('COUNT(a.id)')
+            ->where('a.requiresReplacement = true')
+            ->andWhere('a.endDate >= :now')
+            ->andWhere('a.status IN (:activeStatuses)')
+            ->setParameter('now', $now)
+            ->setParameter('activeStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return [
+            'total' => $total,
+            'pending' => $pending,
+            'active' => $active,
+            'requires_replacement' => $requiresReplacement,
+        ];
     }
 
     /**
-     * Trouve les absences sans notes
+     * Compte les absences par prestataire (pour admin)
      */
-    public function findWithoutNotes(Prestataire $prestataire): array
+    public function countByPrestataires(
+        ?\DateTimeInterface $startDate = null,
+        ?\DateTimeInterface $endDate = null
+    ): array {
+        $qb = $this->createQueryBuilder('a')
+            ->select('p.id, p.firstName, p.lastName, COUNT(a.id) as absence_count, SUM(DATEDIFF(a.endDate, a.startDate) + 1) as total_days')
+            ->innerJoin('a.prestataire', 'p')
+            ->groupBy('p.id');
+
+        if ($startDate) {
+            $qb->andWhere('a.startDate >= :startDate')
+               ->setParameter('startDate', $startDate);
+        }
+
+        if ($endDate) {
+            $qb->andWhere('a.endDate <= :endDate')
+               ->setParameter('endDate', $endDate);
+        }
+
+        return $qb->orderBy('total_days', 'DESC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    // ============================================
+    // ALERTES ET NOTIFICATIONS
+    // ============================================
+
+    /**
+     * Trouve les absences se terminant bientôt
+     */
+    public function findEndingSoon(int $days = 7): array
+    {
+        $now = new \DateTimeImmutable();
+        $threshold = $now->modify("+{$days} days");
+
+        return $this->createQueryBuilder('a')
+            ->where('a.endDate BETWEEN :now AND :threshold')
+            ->andWhere('a.status IN (:activeStatuses)')
+            ->setParameter('now', $now)
+            ->setParameter('threshold', $threshold)
+            ->setParameter('activeStatuses', [
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
+            ->orderBy('a.endDate', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Trouve les absences commençant bientôt
+     */
+    public function findStartingSoon(int $days = 7): array
+    {
+        $now = new \DateTimeImmutable();
+        $threshold = $now->modify("+{$days} days");
+
+        return $this->createQueryBuilder('a')
+            ->where('a.startDate BETWEEN :now AND :threshold')
+            ->andWhere('a.status IN (:validStatuses)')
+            ->setParameter('now', $now)
+            ->setParameter('threshold', $threshold)
+            ->setParameter('validStatuses', [
+                Absence::STATUS_PENDING,
+                Absence::STATUS_APPROVED
+            ])
+            ->orderBy('a.startDate', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Trouve les absences longues (plus de X jours)
+     */
+    public function findLongAbsences(int $minDays = 7): array
     {
         return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->andWhere('a.notes IS NULL OR a.notes = :empty')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('empty', '')
+            ->where('DATEDIFF(a.endDate, a.startDate) >= :minDays')
+            ->andWhere('a.status IN (:validStatuses)')
+            ->setParameter('minDays', $minDays)
+            ->setParameter('validStatuses', [
+                Absence::STATUS_PENDING,
+                Absence::STATUS_APPROVED,
+                Absence::STATUS_ACTIVE
+            ])
             ->orderBy('a.startDate', 'DESC')
             ->getQuery()
             ->getResult();
     }
 
-    /**
-     * Recherche d'absences
-     */
-    public function search(
-        Prestataire $prestataire,
-        array $criteria
-    ): array {
-        $qb = $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->setParameter('prestataire', $prestataire);
-
-        if (isset($criteria['reason'])) {
-            $qb->andWhere('a.reason LIKE :reason')
-               ->setParameter('reason', '%' . $criteria['reason'] . '%');
-        }
-
-        if (isset($criteria['start_date'])) {
-            $qb->andWhere('a.startDate >= :startDate')
-               ->setParameter('startDate', $criteria['start_date']);
-        }
-
-        if (isset($criteria['end_date'])) {
-            $qb->andWhere('a.endDate <= :endDate')
-               ->setParameter('endDate', $criteria['end_date']);
-        }
-
-        if (isset($criteria['min_duration'])) {
-            $qb->andWhere('DATEDIFF(a.endDate, a.startDate) + 1 >= :minDuration')
-               ->setParameter('minDuration', $criteria['min_duration']);
-        }
-
-        if (isset($criteria['max_duration'])) {
-            $qb->andWhere('DATEDIFF(a.endDate, a.startDate) + 1 <= :maxDuration')
-               ->setParameter('maxDuration', $criteria['max_duration']);
-        }
-
-        return $qb->orderBy('a.startDate', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
+    // ============================================
+    // ADMINISTRATION
+    // ============================================
 
     /**
-     * Exporte les absences en CSV
+     * Approuve une absence
      */
-    public function exportToCsv(array $absences): string
+    public function approve(Absence $absence, Admin $admin): void
     {
-        $handle = fopen('php://temp', 'r+');
-        
-        // En-têtes
-        fputcsv($handle, [
-            'Date début',
-            'Date fin',
-            'Durée (jours)',
-            'Raison',
-            'Notes',
-            'Créé le'
-        ]);
+        $absence->setStatus(Absence::STATUS_APPROVED);
+        $absence->setApprovedBy($admin);
+        $absence->setApprovedAt(new \DateTimeImmutable());
 
-        // Données
-        foreach ($absences as $absence) {
-            fputcsv($handle, [
-                $absence->getStartDate()->format('d/m/Y'),
-                $absence->getEndDate()->format('d/m/Y'),
-                $absence->getDuration(),
-                $absence->getReason(),
-                $absence->getNotes() ?? '',
-                $absence->getCreatedAt()->format('d/m/Y H:i')
-            ]);
-        }
-
-        rewind($handle);
-        $csv = stream_get_contents($handle);
-        fclose($handle);
-
-        return $csv;
+        $this->getEntityManager()->flush();
     }
 
     /**
-     * Trouve les périodes sans absence
+     * Rejette une absence
      */
-    public function findPeriodsWithoutAbsence(
+    public function reject(Absence $absence, Admin $admin, string $reason): void
+    {
+        $absence->setStatus(Absence::STATUS_REJECTED);
+        $absence->setApprovedBy($admin);
+        $absence->setRejectionReason($reason);
+        $absence->setApprovedAt(new \DateTimeImmutable());
+
+        $this->getEntityManager()->flush();
+    }
+
+    /**
+     * Trouve les absences approuvées par un admin
+     */
+    public function findApprovedByAdmin(Admin $admin, ?int $limit = null): array
+    {
+        $qb = $this->createQueryBuilder('a')
+            ->where('a.approvedBy = :admin')
+            ->setParameter('admin', $admin)
+            ->orderBy('a.approvedAt', 'DESC');
+
+        if ($limit) {
+            $qb->setMaxResults($limit);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // UTILITAIRES
+    // ============================================
+
+    /**
+     * Trouve les périodes sans absence (disponibles)
+     */
+    public function findAvailablePeriods(
         Prestataire $prestataire,
         \DateTimeInterface $startDate,
         \DateTimeInterface $endDate
     ): array {
-        $absences = $this->findBetweenDates($prestataire, $startDate, $endDate);
+        $absences = $this->findBetweenDates($prestataire, $startDate, $endDate, Absence::STATUS_APPROVED);
 
         if (empty($absences)) {
             return [[
@@ -546,6 +799,7 @@ class AbsenceRepository extends ServiceEntityRepository
             ]];
         }
 
+        // Trier par date de début
         usort($absences, fn($a, $b) => $a->getStartDate() <=> $b->getStartDate());
 
         $periods = [];
@@ -580,73 +834,158 @@ class AbsenceRepository extends ServiceEntityRepository
     }
 
     /**
-     * Compte les absences par prestataire (pour admin)
+     * Export CSV des absences
      */
-    public function countByPrestataires(
-        ?\DateTimeInterface $startDate = null,
-        ?\DateTimeInterface $endDate = null
-    ): array {
-        $qb = $this->createQueryBuilder('a')
-            ->select('p.id, p.firstName, p.lastName, COUNT(a.id) as absence_count, SUM(DATEDIFF(a.endDate, a.startDate) + 1) as total_days')
-            ->innerJoin('a.prestataire', 'p')
-            ->groupBy('p.id');
+    public function exportToCsv(array $absences): string
+    {
+        $handle = fopen('php://temp', 'r+');
+        
+        // En-têtes
+        fputcsv($handle, [
+            'ID',
+            'Prestataire',
+            'Type',
+            'Statut',
+            'Date début',
+            'Date fin',
+            'Durée (jours)',
+            'Raison',
+            'Remplacement requis',
+            'Approuvé par',
+            'Date création'
+        ]);
 
-        if ($startDate) {
-            $qb->andWhere('a.startDate >= :startDate')
-               ->setParameter('startDate', $startDate);
+        // Données
+        foreach ($absences as $absence) {
+            $duration = $absence->getStartDate()->diff($absence->getEndDate())->days + 1;
+            
+            fputcsv($handle, [
+                $absence->getId(),
+                $absence->getPrestataire()->getFullName(),
+                $absence->getType(),
+                $absence->getStatus(),
+                $absence->getStartDate()->format('d/m/Y'),
+                $absence->getEndDate()->format('d/m/Y'),
+                $duration,
+                $absence->getReason() ?? '',
+                $absence->requiresReplacement() ? 'Oui' : 'Non',
+                $absence->getApprovedBy()?->getFullName() ?? '',
+                $absence->getCreatedAt()->format('d/m/Y H:i')
+            ]);
         }
 
-        if ($endDate) {
-            $qb->andWhere('a.endDate <= :endDate')
-               ->setParameter('endDate', $endDate);
+        rewind($handle);
+        $csv = stream_get_contents($handle);
+        fclose($handle);
+
+        return $csv;
+    }
+
+    // ============================================
+    // RECHERCHE AVANCÉE
+    // ============================================
+
+    /**
+     * Recherche avancée d'absences avec multiples critères
+     */
+    public function search(array $criteria): array
+    {
+        $qb = $this->createQueryBuilder('a');
+
+        // Filtre par prestataire
+        if (isset($criteria['prestataire_id'])) {
+            $qb->andWhere('a.prestataire = :prestataireId')
+               ->setParameter('prestataireId', $criteria['prestataire_id']);
         }
 
-        return $qb->orderBy('total_days', 'DESC')
-            ->getQuery()
-            ->getResult();
+        // Filtre par type
+        if (isset($criteria['type'])) {
+            $qb->andWhere('a.type = :type')
+               ->setParameter('type', $criteria['type']);
+        }
+
+        // Filtre par statut
+        if (isset($criteria['status'])) {
+            $qb->andWhere('a.status = :status')
+               ->setParameter('status', $criteria['status']);
+        }
+
+        // Filtre par statuts multiples
+        if (isset($criteria['statuses']) && is_array($criteria['statuses'])) {
+            $qb->andWhere('a.status IN (:statuses)')
+               ->setParameter('statuses', $criteria['statuses']);
+        }
+
+        // Filtre par remplacement requis
+        if (isset($criteria['requires_replacement'])) {
+            $qb->andWhere('a.requiresReplacement = :requiresReplacement')
+               ->setParameter('requiresReplacement', $criteria['requires_replacement']);
+        }
+
+        // Filtre par période
+        if (isset($criteria['start_date_from'])) {
+            $qb->andWhere('a.startDate >= :startDateFrom')
+               ->setParameter('startDateFrom', $criteria['start_date_from']);
+        }
+
+        if (isset($criteria['start_date_to'])) {
+            $qb->andWhere('a.startDate <= :startDateTo')
+               ->setParameter('startDateTo', $criteria['start_date_to']);
+        }
+
+        if (isset($criteria['end_date_from'])) {
+            $qb->andWhere('a.endDate >= :endDateFrom')
+               ->setParameter('endDateFrom', $criteria['end_date_from']);
+        }
+
+        if (isset($criteria['end_date_to'])) {
+            $qb->andWhere('a.endDate <= :endDateTo')
+               ->setParameter('endDateTo', $criteria['end_date_to']);
+        }
+
+        // Filtre par durée minimale
+        if (isset($criteria['min_duration_days'])) {
+            $qb->andWhere('DATEDIFF(a.endDate, a.startDate) >= :minDuration')
+               ->setParameter('minDuration', $criteria['min_duration_days']);
+        }
+
+        // Filtre par admin approbateur
+        if (isset($criteria['approved_by'])) {
+            $qb->andWhere('a.approvedBy = :approvedBy')
+               ->setParameter('approvedBy', $criteria['approved_by']);
+        }
+
+        // Tri
+        $orderBy = $criteria['order_by'] ?? 'startDate';
+        $orderDirection = $criteria['order_direction'] ?? 'DESC';
+        
+        $qb->orderBy('a.' . $orderBy, $orderDirection);
+
+        // Limite
+        if (isset($criteria['limit'])) {
+            $qb->setMaxResults($criteria['limit']);
+        }
+
+        // Offset
+        if (isset($criteria['offset'])) {
+            $qb->setFirstResult($criteria['offset']);
+        }
+
+        return $qb->getQuery()->getResult();
     }
 
-    /**
-     * Trouve les absences se terminant bientôt
-     */
-    public function findEndingSoon(
-        Prestataire $prestataire,
-        int $days = 7
-    ): array {
-        $today = new \DateTime();
-        $futureDate = (clone $today)->modify("+{$days} days");
-
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->andWhere('a.endDate >= :today')
-            ->andWhere('a.endDate <= :futureDate')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('today', $today)
-            ->setParameter('futureDate', $futureDate)
-            ->orderBy('a.endDate', 'ASC')
-            ->getQuery()
-            ->getResult();
-    }
+    // ============================================
+    // QUERY BUILDER PERSONNALISÉ
+    // ============================================
 
     /**
-     * Trouve les absences commençant bientôt
+     * Crée un QueryBuilder de base avec les jointures courantes
      */
-    public function findStartingSoon(
-        Prestataire $prestataire,
-        int $days = 7
-    ): array {
-        $today = new \DateTime();
-        $futureDate = (clone $today)->modify("+{$days} days");
-
-        return $this->createQueryBuilder('a')
-            ->andWhere('a.prestataire = :prestataire')
-            ->andWhere('a.startDate > :today')
-            ->andWhere('a.startDate <= :futureDate')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('today', $today)
-            ->setParameter('futureDate', $futureDate)
-            ->orderBy('a.startDate', 'ASC')
-            ->getQuery()
-            ->getResult();
+    public function createBaseQueryBuilder(string $alias = 'a'): QueryBuilder
+    {
+        return $this->createQueryBuilder($alias)
+            ->leftJoin($alias . '.prestataire', 'p')
+            ->leftJoin($alias . '.approvedBy', 'admin')
+            ->leftJoin($alias . '.affectedBookings', 'b');
     }
 }

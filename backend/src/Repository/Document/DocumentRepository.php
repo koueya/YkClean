@@ -1,550 +1,35 @@
 <?php
+// src/Repository/Document/DocumentRepository.php
 
 namespace App\Repository\Document;
 
 use App\Entity\Document\Document;
-use App\Entity\User\Prestataire;
 use App\Entity\User\Admin;
+use App\Entity\User\Client;
+use App\Entity\User\Prestataire;
+use App\Entity\User\User;
+use App\Enum\DocumentStatus;
+use App\Enum\DocumentType;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\ORM\QueryBuilder;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
  * Repository pour l'entité Document
  * 
- * Gestion des documents des prestataires (KBIS, assurance, identité, diplômes)
+ * Gestion des documents des utilisateurs (Clients et Prestataires)
  * 
  * @extends ServiceEntityRepository<Document>
  */
 class DocumentRepository extends ServiceEntityRepository
 {
-    // Types de documents
-    public const TYPE_IDENTITY_CARD = 'identity_card';
-    public const TYPE_KBIS = 'kbis';
-    public const TYPE_INSURANCE = 'insurance';
-    public const TYPE_DIPLOMA = 'diploma';
-    public const TYPE_CRIMINAL_RECORD = 'criminal_record';
-    public const TYPE_TAX_CERTIFICATE = 'tax_certificate';
-    public const TYPE_BANK_DETAILS = 'bank_details';
-    public const TYPE_OTHER = 'other';
-
-    // Statuts de document
-    public const STATUS_PENDING = 'pending';
-    public const STATUS_VERIFIED = 'verified';
-    public const STATUS_REJECTED = 'rejected';
-    public const STATUS_EXPIRED = 'expired';
-
     public function __construct(ManagerRegistry $registry)
     {
         parent::__construct($registry, Document::class);
     }
 
     /**
-     * Trouve tous les documents d'un prestataire
-     */
-    public function findByPrestataire(Prestataire $prestataire, ?string $type = null): array
-    {
-        $qb = $this->createQueryBuilder('d')
-            ->where('d.prestataire = :prestataire')
-            ->setParameter('prestataire', $prestataire)
-            ->orderBy('d.uploadedAt', 'DESC');
-
-        if ($type) {
-            $qb->andWhere('d.type = :type')
-                ->setParameter('type', $type);
-        }
-
-        return $qb->getQuery()->getResult();
-    }
-
-    /**
-     * Trouve les documents par statut
-     */
-    public function findByStatus(string $status, ?string $type = null): array
-    {
-        $qb = $this->createQueryBuilder('d')
-            ->where('d.status = :status')
-            ->setParameter('status', $status)
-            ->orderBy('d.uploadedAt', 'DESC');
-
-        if ($type) {
-            $qb->andWhere('d.type = :type')
-                ->setParameter('type', $type);
-        }
-
-        return $qb->getQuery()->getResult();
-    }
-
-    /**
-     * Trouve les documents en attente de vérification
-     */
-    public function findPendingDocuments(?string $type = null, ?int $limit = null): array
-    {
-        $qb = $this->createQueryBuilder('d')
-            ->where('d.status = :status')
-            ->setParameter('status', self::STATUS_PENDING)
-            ->orderBy('d.uploadedAt', 'ASC'); // Les plus anciens en premier
-
-        if ($type) {
-            $qb->andWhere('d.type = :type')
-                ->setParameter('type', $type);
-        }
-
-        if ($limit) {
-            $qb->setMaxResults($limit);
-        }
-
-        return $qb->getQuery()->getResult();
-    }
-
-    /**
-     * Trouve les documents vérifiés d'un prestataire
-     */
-    public function findVerifiedByPrestataire(Prestataire $prestataire): array
-    {
-        return $this->createQueryBuilder('d')
-            ->where('d.prestataire = :prestataire')
-            ->andWhere('d.status = :status')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('status', self::STATUS_VERIFIED)
-            ->orderBy('d.verifiedAt', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Trouve les documents rejetés d'un prestataire
-     */
-    public function findRejectedByPrestataire(Prestataire $prestataire): array
-    {
-        return $this->createQueryBuilder('d')
-            ->where('d.prestataire = :prestataire')
-            ->andWhere('d.status = :status')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('status', self::STATUS_REJECTED)
-            ->orderBy('d.uploadedAt', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Trouve les documents expirés ou qui vont expirer
-     */
-    public function findExpiredOrExpiring(\DateTimeInterface $date = null): array
-    {
-        $date = $date ?? new \DateTime();
-
-        return $this->createQueryBuilder('d')
-            ->where('d.expiresAt IS NOT NULL')
-            ->andWhere('d.expiresAt <= :date')
-            ->andWhere('d.status = :status')
-            ->setParameter('date', $date)
-            ->setParameter('status', self::STATUS_VERIFIED)
-            ->orderBy('d.expiresAt', 'ASC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Trouve les documents qui vont expirer dans X jours
-     */
-    public function findExpiringInDays(int $days = 30): array
-    {
-        $startDate = new \DateTime();
-        $endDate = new \DateTime("+{$days} days");
-
-        return $this->createQueryBuilder('d')
-            ->where('d.expiresAt IS NOT NULL')
-            ->andWhere('d.expiresAt BETWEEN :startDate AND :endDate')
-            ->andWhere('d.status = :status')
-            ->setParameter('startDate', $startDate)
-            ->setParameter('endDate', $endDate)
-            ->setParameter('status', self::STATUS_VERIFIED)
-            ->orderBy('d.expiresAt', 'ASC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Trouve le dernier document d'un type pour un prestataire
-     */
-    public function findLatestByType(Prestataire $prestataire, string $type): ?Document
-    {
-        return $this->createQueryBuilder('d')
-            ->where('d.prestataire = :prestataire')
-            ->andWhere('d.type = :type')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('type', $type)
-            ->orderBy('d.uploadedAt', 'DESC')
-            ->setMaxResults(1)
-            ->getQuery()
-            ->getOneOrNullResult();
-    }
-
-    /**
-     * Vérifie si un prestataire a tous les documents requis
-     */
-    public function hasAllRequiredDocuments(Prestataire $prestataire): bool
-    {
-        $requiredTypes = [
-            self::TYPE_IDENTITY_CARD,
-            self::TYPE_KBIS,
-            self::TYPE_INSURANCE,
-        ];
-
-        foreach ($requiredTypes as $type) {
-            $document = $this->createQueryBuilder('d')
-                ->where('d.prestataire = :prestataire')
-                ->andWhere('d.type = :type')
-                ->andWhere('d.status = :status')
-                ->setParameter('prestataire', $prestataire)
-                ->setParameter('type', $type)
-                ->setParameter('status', self::STATUS_VERIFIED)
-                ->setMaxResults(1)
-                ->getQuery()
-                ->getOneOrNullResult();
-
-            if (!$document) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Compte les documents par statut pour un prestataire
-     */
-    public function countByStatus(Prestataire $prestataire, string $status): int
-    {
-        return (int) $this->createQueryBuilder('d')
-            ->select('COUNT(d.id)')
-            ->where('d.prestataire = :prestataire')
-            ->andWhere('d.status = :status')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('status', $status)
-            ->getQuery()
-            ->getSingleScalarResult();
-    }
-
-    /**
-     * Obtient les statistiques des documents d'un prestataire
-     */
-    public function getStatisticsByPrestataire(Prestataire $prestataire): array
-    {
-        $qb = $this->createQueryBuilder('d')
-            ->where('d.prestataire = :prestataire')
-            ->setParameter('prestataire', $prestataire);
-
-        $total = (int) (clone $qb)
-            ->select('COUNT(d.id)')
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        $pending = (int) (clone $qb)
-            ->select('COUNT(d.id)')
-            ->andWhere('d.status = :status')
-            ->setParameter('status', self::STATUS_PENDING)
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        $verified = (int) (clone $qb)
-            ->select('COUNT(d.id)')
-            ->andWhere('d.status = :status')
-            ->setParameter('status', self::STATUS_VERIFIED)
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        $rejected = (int) (clone $qb)
-            ->select('COUNT(d.id)')
-            ->andWhere('d.status = :status')
-            ->setParameter('status', self::STATUS_REJECTED)
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        return [
-            'total' => $total,
-            'pending' => $pending,
-            'verified' => $verified,
-            'rejected' => $rejected,
-            'completion_rate' => $total > 0 ? round(($verified / $total) * 100, 2) : 0,
-        ];
-    }
-
-    /**
-     * Obtient les statistiques globales des documents
-     */
-    public function getGlobalStatistics(): array
-    {
-        $qb = $this->createQueryBuilder('d');
-
-        $total = (int) (clone $qb)
-            ->select('COUNT(d.id)')
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        $pending = (int) (clone $qb)
-            ->select('COUNT(d.id)')
-            ->where('d.status = :status')
-            ->setParameter('status', self::STATUS_PENDING)
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        $verified = (int) (clone $qb)
-            ->select('COUNT(d.id)')
-            ->where('d.status = :status')
-            ->setParameter('status', self::STATUS_VERIFIED)
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        $rejected = (int) (clone $qb)
-            ->select('COUNT(d.id)')
-            ->where('d.status = :status')
-            ->setParameter('status', self::STATUS_REJECTED)
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        $expired = (int) (clone $qb)
-            ->select('COUNT(d.id)')
-            ->where('d.expiresAt IS NOT NULL')
-            ->andWhere('d.expiresAt < :now')
-            ->andWhere('d.status = :status')
-            ->setParameter('now', new \DateTime())
-            ->setParameter('status', self::STATUS_VERIFIED)
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        return [
-            'total' => $total,
-            'pending' => $pending,
-            'verified' => $verified,
-            'rejected' => $rejected,
-            'expired' => $expired,
-        ];
-    }
-
-    /**
-     * Trouve les documents vérifiés par un admin
-     */
-    public function findVerifiedByAdmin(Admin $admin): array
-    {
-        return $this->createQueryBuilder('d')
-            ->where('d.verifiedBy = :admin')
-            ->setParameter('admin', $admin)
-            ->orderBy('d.verifiedAt', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Compte les documents vérifiés par un admin
-     */
-    public function countVerifiedByAdmin(Admin $admin, ?\DateTimeInterface $since = null): int
-    {
-        $qb = $this->createQueryBuilder('d')
-            ->select('COUNT(d.id)')
-            ->where('d.verifiedBy = :admin')
-            ->setParameter('admin', $admin);
-
-        if ($since) {
-            $qb->andWhere('d.verifiedAt >= :since')
-                ->setParameter('since', $since);
-        }
-
-        return (int) $qb->getQuery()->getSingleScalarResult();
-    }
-
-    /**
-     * Trouve les documents uploadés dans une période
-     */
-    public function findUploadedBetween(
-        \DateTimeInterface $startDate,
-        \DateTimeInterface $endDate
-    ): array {
-        return $this->createQueryBuilder('d')
-            ->where('d.uploadedAt BETWEEN :startDate AND :endDate')
-            ->setParameter('startDate', $startDate)
-            ->setParameter('endDate', $endDate)
-            ->orderBy('d.uploadedAt', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Recherche de documents avec critères multiples
-     */
-    public function search(array $criteria): array
-    {
-        $qb = $this->createQueryBuilder('d');
-
-        if (isset($criteria['prestataire_id'])) {
-            $qb->andWhere('d.prestataire = :prestataireId')
-                ->setParameter('prestataireId', $criteria['prestataire_id']);
-        }
-
-        if (isset($criteria['type'])) {
-            if (is_array($criteria['type'])) {
-                $qb->andWhere('d.type IN (:types)')
-                    ->setParameter('types', $criteria['type']);
-            } else {
-                $qb->andWhere('d.type = :type')
-                    ->setParameter('type', $criteria['type']);
-            }
-        }
-
-        if (isset($criteria['status'])) {
-            if (is_array($criteria['status'])) {
-                $qb->andWhere('d.status IN (:statuses)')
-                    ->setParameter('statuses', $criteria['status']);
-            } else {
-                $qb->andWhere('d.status = :status')
-                    ->setParameter('status', $criteria['status']);
-            }
-        }
-
-        if (isset($criteria['verified_by'])) {
-            $qb->andWhere('d.verifiedBy = :verifiedBy')
-                ->setParameter('verifiedBy', $criteria['verified_by']);
-        }
-
-        if (isset($criteria['start_date'])) {
-            $qb->andWhere('d.uploadedAt >= :startDate')
-                ->setParameter('startDate', $criteria['start_date']);
-        }
-
-        if (isset($criteria['end_date'])) {
-            $qb->andWhere('d.uploadedAt <= :endDate')
-                ->setParameter('endDate', $criteria['end_date']);
-        }
-
-        if (isset($criteria['expiring_before'])) {
-            $qb->andWhere('d.expiresAt IS NOT NULL')
-                ->andWhere('d.expiresAt <= :expiringBefore')
-                ->setParameter('expiringBefore', $criteria['expiring_before']);
-        }
-
-        if (isset($criteria['min_file_size'])) {
-            $qb->andWhere('d.fileSize >= :minFileSize')
-                ->setParameter('minFileSize', $criteria['min_file_size']);
-        }
-
-        if (isset($criteria['max_file_size'])) {
-            $qb->andWhere('d.fileSize <= :maxFileSize')
-                ->setParameter('maxFileSize', $criteria['max_file_size']);
-        }
-
-        $qb->orderBy('d.uploadedAt', 'DESC');
-
-        return $qb->getQuery()->getResult();
-    }
-
-    /**
-     * Trouve les doublons de documents
-     */
-    public function findDuplicates(Prestataire $prestataire, string $type): array
-    {
-        return $this->createQueryBuilder('d')
-            ->where('d.prestataire = :prestataire')
-            ->andWhere('d.type = :type')
-            ->setParameter('prestataire', $prestataire)
-            ->setParameter('type', $type)
-            ->orderBy('d.uploadedAt', 'DESC')
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Supprime les anciens documents (garde le plus récent)
-     */
-    public function deleteOldDocuments(Prestataire $prestataire, string $type, int $keepLatest = 1): int
-    {
-        $documents = $this->findDuplicates($prestataire, $type);
-
-        if (count($documents) <= $keepLatest) {
-            return 0;
-        }
-
-        // Garder les N plus récents
-        $toKeep = array_slice($documents, 0, $keepLatest);
-        $toDelete = array_slice($documents, $keepLatest);
-
-        $deletedCount = 0;
-        foreach ($toDelete as $document) {
-            $this->getEntityManager()->remove($document);
-            $deletedCount++;
-        }
-
-        $this->getEntityManager()->flush();
-
-        return $deletedCount;
-    }
-
-    /**
-     * Obtient la taille totale des fichiers d'un prestataire
-     */
-    public function getTotalFileSize(Prestataire $prestataire): int
-    {
-        $result = $this->createQueryBuilder('d')
-            ->select('SUM(d.fileSize)')
-            ->where('d.prestataire = :prestataire')
-            ->setParameter('prestataire', $prestataire)
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        return (int) ($result ?? 0);
-    }
-
-    /**
-     * Obtient la taille totale de tous les fichiers
-     */
-    public function getTotalStorageSize(): int
-    {
-        $result = $this->createQueryBuilder('d')
-            ->select('SUM(d.fileSize)')
-            ->getQuery()
-            ->getSingleScalarResult();
-
-        return (int) ($result ?? 0);
-    }
-
-    /**
-     * Trouve les prestataires avec documents manquants
-     */
-    public function findPrestatairesWithMissingDocuments(): array
-    {
-        // Requête complexe pour trouver les prestataires qui n'ont pas tous les documents requis
-        $requiredTypes = [
-            self::TYPE_IDENTITY_CARD,
-            self::TYPE_KBIS,
-            self::TYPE_INSURANCE,
-        ];
-
-        $qb = $this->getEntityManager()->createQueryBuilder();
-        
-        return $qb->select('DISTINCT p')
-            ->from('App\Entity\User\Prestataire', 'p')
-            ->leftJoin('p.documents', 'd', 'WITH', 'd.status = :verified')
-            ->where(
-                $qb->expr()->notIn('p.id',
-                    $this->getEntityManager()->createQueryBuilder()
-                        ->select('DISTINCT p2.id')
-                        ->from('App\Entity\User\Prestataire', 'p2')
-                        ->join('p2.documents', 'd2')
-                        ->where('d2.status = :verified')
-                        ->andWhere('d2.type IN (:requiredTypes)')
-                        ->groupBy('p2.id')
-                        ->having('COUNT(DISTINCT d2.type) = :requiredCount')
-                        ->getDQL()
-                )
-            )
-            ->setParameter('verified', self::STATUS_VERIFIED)
-            ->setParameter('requiredTypes', $requiredTypes)
-            ->setParameter('requiredCount', count($requiredTypes))
-            ->getQuery()
-            ->getResult();
-    }
-
-    /**
-     * Sauvegarde un document
+     * Persiste un document
      */
     public function save(Document $document, bool $flush = false): void
     {
@@ -565,5 +50,751 @@ class DocumentRepository extends ServiceEntityRepository
         if ($flush) {
             $this->getEntityManager()->flush();
         }
+    }
+
+    // ============================================
+    // RECHERCHE PAR UTILISATEUR (POLYMORPHE)
+    // ============================================
+
+    /**
+     * Trouve tous les documents d'un utilisateur (Client ou Prestataire)
+     */
+    public function findByUser(User $user, ?DocumentType $type = null): array
+    {
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.user = :user')
+            ->setParameter('user', $user)
+            ->orderBy('d.uploadedAt', 'DESC');
+
+        if ($type) {
+            $qb->andWhere('d.type = :type')
+                ->setParameter('type', $type);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve tous les documents d'un prestataire
+     */
+    public function findByPrestataire(Prestataire $prestataire, ?DocumentType $type = null): array
+    {
+        return $this->findByUser($prestataire, $type);
+    }
+
+    /**
+     * Trouve tous les documents d'un client
+     */
+    public function findByClient(Client $client, ?DocumentType $type = null): array
+    {
+        return $this->findByUser($client, $type);
+    }
+
+    /**
+     * Trouve le dernier document d'un type pour un utilisateur
+     */
+    public function findLatestByUserAndType(User $user, DocumentType $type): ?Document
+    {
+        return $this->createQueryBuilder('d')
+            ->where('d.user = :user')
+            ->andWhere('d.type = :type')
+            ->setParameter('user', $user)
+            ->setParameter('type', $type)
+            ->orderBy('d.uploadedAt', 'DESC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
+    // ============================================
+    // RECHERCHE PAR TYPE D'UTILISATEUR
+    // ============================================
+
+    /**
+     * Trouve tous les documents des clients
+     */
+    public function findAllClientDocuments(?DocumentType $type = null): array
+    {
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.userType = :userType')
+            ->setParameter('userType', 'client')
+            ->orderBy('d.uploadedAt', 'DESC');
+
+        if ($type) {
+            $qb->andWhere('d.type = :type')
+                ->setParameter('type', $type);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve tous les documents des prestataires
+     */
+    public function findAllPrestataireDocuments(?DocumentType $type = null): array
+    {
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.userType = :userType')
+            ->setParameter('userType', 'prestataire')
+            ->orderBy('d.uploadedAt', 'DESC');
+
+        if ($type) {
+            $qb->andWhere('d.type = :type')
+                ->setParameter('type', $type);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // RECHERCHE PAR STATUT
+    // ============================================
+
+    /**
+     * Trouve les documents par statut
+     */
+    public function findByStatus(
+        DocumentStatus $status, 
+        ?DocumentType $type = null,
+        ?string $userType = null
+    ): array {
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.status = :status')
+            ->setParameter('status', $status)
+            ->orderBy('d.uploadedAt', 'DESC');
+
+        if ($type) {
+            $qb->andWhere('d.type = :type')
+                ->setParameter('type', $type);
+        }
+
+        if ($userType) {
+            $qb->andWhere('d.userType = :userType')
+                ->setParameter('userType', $userType);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les documents en attente de vérification
+     */
+    public function findPendingDocuments(
+        ?DocumentType $type = null,
+        ?string $userType = null,
+        ?int $limit = null
+    ): array {
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.status = :status')
+            ->andWhere('d.requiresVerification = true')
+            ->setParameter('status', DocumentStatus::PENDING)
+            ->orderBy('d.uploadedAt', 'ASC'); // Les plus anciens en premier
+
+        if ($type) {
+            $qb->andWhere('d.type = :type')
+                ->setParameter('type', $type);
+        }
+
+        if ($userType) {
+            $qb->andWhere('d.userType = :userType')
+                ->setParameter('userType', $userType);
+        }
+
+        if ($limit) {
+            $qb->setMaxResults($limit);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les documents vérifiés d'un utilisateur
+     */
+    public function findVerifiedByUser(User $user, ?DocumentType $type = null): array
+    {
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.user = :user')
+            ->andWhere('d.status = :status')
+            ->setParameter('user', $user)
+            ->setParameter('status', DocumentStatus::APPROVED)
+            ->orderBy('d.verifiedAt', 'DESC');
+
+        if ($type) {
+            $qb->andWhere('d.type = :type')
+                ->setParameter('type', $type);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les documents rejetés d'un utilisateur
+     */
+    public function findRejectedByUser(User $user, ?DocumentType $type = null): array
+    {
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.user = :user')
+            ->andWhere('d.status = :status')
+            ->setParameter('user', $user)
+            ->setParameter('status', DocumentStatus::REJECTED)
+            ->orderBy('d.uploadedAt', 'DESC');
+
+        if ($type) {
+            $qb->andWhere('d.type = :type')
+                ->setParameter('type', $type);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // GESTION DES EXPIRATIONS
+    // ============================================
+
+    /**
+     * Trouve les documents expirés
+     */
+    public function findExpired(?string $userType = null): array
+    {
+        $now = new \DateTimeImmutable();
+
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.expiresAt IS NOT NULL')
+            ->andWhere('d.expiresAt < :now')
+            ->andWhere('d.status = :status')
+            ->setParameter('now', $now)
+            ->setParameter('status', DocumentStatus::APPROVED)
+            ->orderBy('d.expiresAt', 'ASC');
+
+        if ($userType) {
+            $qb->andWhere('d.userType = :userType')
+                ->setParameter('userType', $userType);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les documents expirant dans X jours
+     */
+    public function findExpiringInDays(int $days = 30, ?string $userType = null): array
+    {
+        $now = new \DateTimeImmutable();
+        $endDate = $now->modify("+{$days} days");
+
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.expiresAt IS NOT NULL')
+            ->andWhere('d.expiresAt BETWEEN :now AND :endDate')
+            ->andWhere('d.status = :status')
+            ->setParameter('now', $now)
+            ->setParameter('endDate', $endDate)
+            ->setParameter('status', DocumentStatus::APPROVED)
+            ->orderBy('d.expiresAt', 'ASC');
+
+        if ($userType) {
+            $qb->andWhere('d.userType = :userType')
+                ->setParameter('userType', $userType);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les documents d'un utilisateur qui expirent bientôt
+     */
+    public function findExpiringForUser(User $user, int $days = 30): array
+    {
+        $now = new \DateTimeImmutable();
+        $endDate = $now->modify("+{$days} days");
+
+        return $this->createQueryBuilder('d')
+            ->where('d.user = :user')
+            ->andWhere('d.expiresAt IS NOT NULL')
+            ->andWhere('d.expiresAt BETWEEN :now AND :endDate')
+            ->andWhere('d.status = :status')
+            ->setParameter('user', $user)
+            ->setParameter('now', $now)
+            ->setParameter('endDate', $endDate)
+            ->setParameter('status', DocumentStatus::APPROVED)
+            ->orderBy('d.expiresAt', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Marque les documents expirés
+     */
+    public function markExpiredDocuments(): int
+    {
+        $now = new \DateTimeImmutable();
+
+        return $this->createQueryBuilder('d')
+            ->update()
+            ->set('d.status', ':expiredStatus')
+            ->where('d.expiresAt IS NOT NULL')
+            ->andWhere('d.expiresAt < :now')
+            ->andWhere('d.status = :approvedStatus')
+            ->setParameter('expiredStatus', DocumentStatus::EXPIRED)
+            ->setParameter('now', $now)
+            ->setParameter('approvedStatus', DocumentStatus::APPROVED)
+            ->getQuery()
+            ->execute();
+    }
+
+    // ============================================
+    // VALIDATION ET VÉRIFICATION
+    // ============================================
+
+    /**
+     * Vérifie si un utilisateur a tous les documents requis
+     */
+    public function hasAllRequiredDocuments(User $user): bool
+    {
+        if ($user instanceof Prestataire) {
+            return $this->hasAllRequiredPrestataireDocuments($user);
+        } elseif ($user instanceof Client) {
+            return $this->hasAllRequiredClientDocuments($user);
+        }
+
+        return false;
+    }
+
+    /**
+     * Vérifie si un prestataire a tous les documents obligatoires
+     */
+    public function hasAllRequiredPrestataireDocuments(Prestataire $prestataire): bool
+    {
+        $requiredTypes = [
+            DocumentType::IDENTITY_CARD,
+            DocumentType::KBIS,
+            DocumentType::INSURANCE,
+        ];
+
+        foreach ($requiredTypes as $type) {
+            $document = $this->findLatestByUserAndType($prestataire, $type);
+
+            if (!$document || $document->getStatus() !== DocumentStatus::APPROVED) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Vérifie si un client a tous les documents obligatoires
+     * (Peut varier selon les services demandés)
+     */
+    public function hasAllRequiredClientDocuments(Client $client): bool
+    {
+        // Pour l'instant, aucun document obligatoire pour les clients
+        // Peut être ajusté selon les besoins
+        return true;
+    }
+
+    /**
+     * Compte les documents par statut pour un utilisateur
+     */
+    public function countByStatusForUser(User $user, DocumentStatus $status): int
+    {
+        return (int) $this->createQueryBuilder('d')
+            ->select('COUNT(d.id)')
+            ->where('d.user = :user')
+            ->andWhere('d.status = :status')
+            ->setParameter('user', $user)
+            ->setParameter('status', $status)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    /**
+     * Vérifie si un utilisateur a un document spécifique vérifié
+     */
+    public function hasVerifiedDocument(User $user, DocumentType $type): bool
+    {
+        $document = $this->findLatestByUserAndType($user, $type);
+
+        return $document && $document->getStatus() === DocumentStatus::APPROVED;
+    }
+
+    // ============================================
+    // VÉRIFICATION AUTOMATIQUE
+    // ============================================
+
+    /**
+     * Trouve les documents vérifiés automatiquement
+     */
+    public function findAutoVerified(?string $userType = null, ?int $limit = null): array
+    {
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.isAutoVerified = true')
+            ->orderBy('d.uploadedAt', 'DESC');
+
+        if ($userType) {
+            $qb->andWhere('d.userType = :userType')
+                ->setParameter('userType', $userType);
+        }
+
+        if ($limit) {
+            $qb->setMaxResults($limit);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Trouve les documents avec un score de vérification faible
+     */
+    public function findWithLowVerificationScore(int $threshold = 70): array
+    {
+        return $this->createQueryBuilder('d')
+            ->where('d.isAutoVerified = true')
+            ->andWhere('d.autoVerificationScore < :threshold')
+            ->setParameter('threshold', $threshold)
+            ->orderBy('d.autoVerificationScore', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Trouve les documents par ID externe (Stripe, etc.)
+     */
+    public function findByExternalId(string $externalId): ?Document
+    {
+        return $this->createQueryBuilder('d')
+            ->where('d.externalId = :externalId')
+            ->setParameter('externalId', $externalId)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
+    // ============================================
+    // STATISTIQUES
+    // ============================================
+
+    /**
+     * Obtient les statistiques de documents pour un utilisateur
+     */
+    public function getStatisticsForUser(User $user): array
+    {
+        $total = (int) $this->createQueryBuilder('d')
+            ->select('COUNT(d.id)')
+            ->where('d.user = :user')
+            ->setParameter('user', $user)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $pending = $this->countByStatusForUser($user, DocumentStatus::PENDING);
+        $approved = $this->countByStatusForUser($user, DocumentStatus::APPROVED);
+        $rejected = $this->countByStatusForUser($user, DocumentStatus::REJECTED);
+        $expired = $this->countByStatusForUser($user, DocumentStatus::EXPIRED);
+
+        $completionRate = $total > 0 ? round(($approved / $total) * 100, 2) : 0;
+
+        return [
+            'total' => $total,
+            'pending' => $pending,
+            'approved' => $approved,
+            'rejected' => $rejected,
+            'expired' => $expired,
+            'completionRate' => $completionRate,
+        ];
+    }
+
+    /**
+     * Obtient les statistiques globales des documents
+     */
+    public function getGlobalStatistics(?string $userType = null): array
+    {
+        $qb = $this->createQueryBuilder('d');
+
+        if ($userType) {
+            $qb->where('d.userType = :userType')
+               ->setParameter('userType', $userType);
+        }
+
+        $total = (int) (clone $qb)
+            ->select('COUNT(d.id)')
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $pending = (int) (clone $qb)
+            ->select('COUNT(d.id)')
+            ->andWhere('d.status = :status')
+            ->setParameter('status', DocumentStatus::PENDING)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $approved = (int) (clone $qb)
+            ->select('COUNT(d.id)')
+            ->andWhere('d.status = :status')
+            ->setParameter('status', DocumentStatus::APPROVED)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $rejected = (int) (clone $qb)
+            ->select('COUNT(d.id)')
+            ->andWhere('d.status = :status')
+            ->setParameter('status', DocumentStatus::REJECTED)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $expired = (int) (clone $qb)
+            ->select('COUNT(d.id)')
+            ->andWhere('d.status = :status')
+            ->setParameter('status', DocumentStatus::EXPIRED)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $autoVerified = (int) (clone $qb)
+            ->select('COUNT(d.id)')
+            ->andWhere('d.isAutoVerified = true')
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return [
+            'total' => $total,
+            'pending' => $pending,
+            'approved' => $approved,
+            'rejected' => $rejected,
+            'expired' => $expired,
+            'autoVerified' => $autoVerified,
+            'userType' => $userType,
+        ];
+    }
+
+    /**
+     * Compte les documents par type
+     */
+    public function countByType(?string $userType = null): array
+    {
+        $qb = $this->createQueryBuilder('d')
+            ->select('d.type, COUNT(d.id) as count')
+            ->groupBy('d.type');
+
+        if ($userType) {
+            $qb->where('d.userType = :userType')
+               ->setParameter('userType', $userType);
+        }
+
+        $result = $qb->getQuery()->getResult();
+
+        $counts = [];
+        foreach ($result as $row) {
+            $counts[$row['type']->value] = (int) $row['count'];
+        }
+
+        return $counts;
+    }
+
+    // ============================================
+    // ADMINISTRATION
+    // ============================================
+
+    /**
+     * Trouve les documents vérifiés par un admin
+     */
+    public function findVerifiedByAdmin(Admin $admin, ?int $limit = null): array
+    {
+        $qb = $this->createQueryBuilder('d')
+            ->where('d.verifiedBy = :admin')
+            ->setParameter('admin', $admin)
+            ->orderBy('d.verifiedAt', 'DESC');
+
+        if ($limit) {
+            $qb->setMaxResults($limit);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Obtient les statistiques de vérification d'un admin
+     */
+    public function getAdminVerificationStats(Admin $admin): array
+    {
+        $total = (int) $this->createQueryBuilder('d')
+            ->select('COUNT(d.id)')
+            ->where('d.verifiedBy = :admin')
+            ->setParameter('admin', $admin)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $approved = (int) $this->createQueryBuilder('d')
+            ->select('COUNT(d.id)')
+            ->where('d.verifiedBy = :admin')
+            ->andWhere('d.status = :status')
+            ->setParameter('admin', $admin)
+            ->setParameter('status', DocumentStatus::APPROVED)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $rejected = (int) $this->createQueryBuilder('d')
+            ->select('COUNT(d.id)')
+            ->where('d.verifiedBy = :admin')
+            ->andWhere('d.status = :status')
+            ->setParameter('admin', $admin)
+            ->setParameter('status', DocumentStatus::REJECTED)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return [
+            'total' => $total,
+            'approved' => $approved,
+            'rejected' => $rejected,
+            'approvalRate' => $total > 0 ? round(($approved / $total) * 100, 2) : 0,
+        ];
+    }
+
+    // ============================================
+    // RECHERCHE AVANCÉE
+    // ============================================
+
+    /**
+     * Recherche avancée de documents avec multiples critères
+     */
+    public function search(array $criteria): array
+    {
+        $qb = $this->createQueryBuilder('d');
+
+        // Filtre par type d'utilisateur
+        if (isset($criteria['user_type'])) {
+            $qb->andWhere('d.userType = :userType')
+               ->setParameter('userType', $criteria['user_type']);
+        }
+
+        // Filtre par utilisateur spécifique
+        if (isset($criteria['user_id'])) {
+            $qb->andWhere('d.user = :userId')
+               ->setParameter('userId', $criteria['user_id']);
+        }
+
+        // Filtre par type de document
+        if (isset($criteria['type'])) {
+            $qb->andWhere('d.type = :type')
+               ->setParameter('type', $criteria['type']);
+        }
+
+        // Filtre par statut
+        if (isset($criteria['status'])) {
+            $qb->andWhere('d.status = :status')
+               ->setParameter('status', $criteria['status']);
+        }
+
+        // Filtre par statuts multiples
+        if (isset($criteria['statuses']) && is_array($criteria['statuses'])) {
+            $qb->andWhere('d.status IN (:statuses)')
+               ->setParameter('statuses', $criteria['statuses']);
+        }
+
+        // Filtre par vérification requise
+        if (isset($criteria['requires_verification'])) {
+            $qb->andWhere('d.requiresVerification = :requiresVerification')
+               ->setParameter('requiresVerification', $criteria['requires_verification']);
+        }
+
+        // Filtre par vérification automatique
+        if (isset($criteria['is_auto_verified'])) {
+            $qb->andWhere('d.isAutoVerified = :isAutoVerified')
+               ->setParameter('isAutoVerified', $criteria['is_auto_verified']);
+        }
+
+        // Filtre par date de téléchargement
+        if (isset($criteria['uploaded_after'])) {
+            $qb->andWhere('d.uploadedAt >= :uploadedAfter')
+               ->setParameter('uploadedAfter', $criteria['uploaded_after']);
+        }
+
+        if (isset($criteria['uploaded_before'])) {
+            $qb->andWhere('d.uploadedAt <= :uploadedBefore')
+               ->setParameter('uploadedBefore', $criteria['uploaded_before']);
+        }
+
+        // Filtre par date d'expiration
+        if (isset($criteria['expires_after'])) {
+            $qb->andWhere('d.expiresAt >= :expiresAfter')
+               ->setParameter('expiresAfter', $criteria['expires_after']);
+        }
+
+        if (isset($criteria['expires_before'])) {
+            $qb->andWhere('d.expiresAt <= :expiresBefore')
+               ->setParameter('expiresBefore', $criteria['expires_before']);
+        }
+
+        // Filtre par admin vérificateur
+        if (isset($criteria['verified_by'])) {
+            $qb->andWhere('d.verifiedBy = :verifiedBy')
+               ->setParameter('verifiedBy', $criteria['verified_by']);
+        }
+
+        // Filtre par nom de fichier
+        if (isset($criteria['filename'])) {
+            $qb->andWhere('d.fileName LIKE :filename')
+               ->setParameter('filename', '%' . $criteria['filename'] . '%');
+        }
+
+        // Tri
+        $orderBy = $criteria['order_by'] ?? 'uploadedAt';
+        $orderDirection = $criteria['order_direction'] ?? 'DESC';
+        
+        $qb->orderBy('d.' . $orderBy, $orderDirection);
+
+        // Limite
+        if (isset($criteria['limit'])) {
+            $qb->setMaxResults($criteria['limit']);
+        }
+
+        // Offset
+        if (isset($criteria['offset'])) {
+            $qb->setFirstResult($criteria['offset']);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    // ============================================
+    // NETTOYAGE ET MAINTENANCE
+    // ============================================
+
+    /**
+     * Supprime les documents rejetés anciens
+     */
+    public function cleanupOldRejectedDocuments(int $days = 90): int
+    {
+        $date = new \DateTimeImmutable("-{$days} days");
+
+        return $this->createQueryBuilder('d')
+            ->delete()
+            ->where('d.status = :status')
+            ->andWhere('d.uploadedAt < :date')
+            ->setParameter('status', DocumentStatus::REJECTED)
+            ->setParameter('date', $date)
+            ->getQuery()
+            ->execute();
+    }
+
+    /**
+     * Trouve les documents orphelins (utilisateur supprimé)
+     */
+    public function findOrphanDocuments(): array
+    {
+        return $this->createQueryBuilder('d')
+            ->where('d.user IS NULL')
+            ->getQuery()
+            ->getResult();
+    }
+
+    // ============================================
+    // QUERY BUILDER PERSONNALISÉ
+    // ============================================
+
+    /**
+     * Crée un QueryBuilder de base avec les jointures courantes
+     */
+    public function createBaseQueryBuilder(string $alias = 'd'): QueryBuilder
+    {
+        return $this->createQueryBuilder($alias)
+            ->leftJoin($alias . '.user', 'u')
+            ->leftJoin($alias . '.verifiedBy', 'admin');
     }
 }
